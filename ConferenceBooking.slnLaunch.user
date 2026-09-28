@@ -1,0 +1,15 @@
+[
+  {
+    "Name": "New Profile",
+    "Projects": [
+      {
+        "Path": "ConferenceBooking.Web\\ConferenceBooking.Web.csproj",
+        "Action": "Start"
+      },
+      {
+        "Path": "ConferenceBooking.Services.AuthAPI\\ConferenceBooking.Services.AuthAPI.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]

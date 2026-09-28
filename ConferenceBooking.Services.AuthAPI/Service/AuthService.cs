@@ -168,7 +168,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         {
             try
             {   
-                UserProfileRegistration obj = _mapper.Map<UserProfileRegistration>(profileRegistrationDto);
+                UserProfile obj = _mapper.Map<UserProfile>(profileRegistrationDto);
                 _db.Tbl_User_Profile.Add(obj);
                 _db.SaveChanges();
                 _response.Result = _mapper.Map<UserProfileRegistrationDto>(obj);

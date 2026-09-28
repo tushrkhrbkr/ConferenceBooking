@@ -76,6 +76,16 @@ namespace ConferenceBooking.Web.Service
         //}
 
 
+        public async Task<ResponseDto?> GetUserRole(string Uid)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.GET,
+                Url = SD.AuthAPIBase + "/api/auth/GetUserRole/" + Uid,
+                Data = Uid
+            }, withBearer: false);
+        }
+
         public async Task<ResponseDto?> SaveUserSession(UserLoginSessionsDto userLoginSessionsDto)
         {
             return await _baseService.SendAsync(new RequestDto()
