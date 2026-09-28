@@ -29,26 +29,9 @@ namespace MUS.Webapp.Controllers
         [HttpGet]
         public IActionResult Login()
         {            
-            var userName = HttpContext.User.Identity.Name;
-            if (userName != null && userName.Split('\\')[0] == "SAMANVAY")
-            {
-                TempData["LdapUser"] = userName.Split('\\')[1];
-                TempData["LdapDisplayName"] = GetADuserData(userName.Split('\\')[1]).Item1;
-            }
             return View();
         }
         
-        [HttpGet]
-        public (string, string, string) GetADuserData(string userName)
-        {            
-            var directoryEntry = new DirectoryEntry("LDAP://samanvay.in");
-            var directorySearcher = new DirectorySearcher(directoryEntry)
-            {
-                Filter = $"(&(objectClass=user)(sAMAccountName={userName}))"
-            };
-            var result = directorySearcher.FindOne();
-            return (result?.Properties["displayName"]?[0]?.ToString(), result?.Properties["userPrincipalName"]?[0]?.ToString(), result?.Properties["ipPhone"]?[0]?.ToString());
-        }
 
         [HttpPost]
         public async Task<IActionResult> Login(LoginRequestDto obj)
@@ -92,50 +75,6 @@ namespace MUS.Webapp.Controllers
                 return View(obj);
             }
 
-        }
-        
-        [HttpGet]
-        public async Task<IActionResult> LoginBySSO(string? username)
-        {
-            if (username != null)
-            {
-                ResponseDto responseDto = await _authService.LoginBySSO(username);
-                if (responseDto != null && responseDto.IsSuccess)
-                {
-                    LoginResponseDto loginResponseDto = JsonConvert.DeserializeObject<LoginResponseDto>(Convert.ToString(responseDto.Result));
-                    var userid = loginResponseDto.User.ID;
-                    var sessionId = Guid.NewGuid();
-                    HttpContext.Session.SetString("UserID", userid);
-                    HttpContext.Session.SetString("SessionId", sessionId.ToString());
-                    ResponseDto userRoleResponseDto = await _authService.GetUserRole(userid);
-                    List<string> roleList=new List<string>();
-                    if (userRoleResponseDto != null && userRoleResponseDto.IsSuccess)
-                    {
-                        roleList = JsonConvert.DeserializeObject<List<string>>(Convert.ToString(userRoleResponseDto.Result));
-
-                    }
-                    await SignInUser(loginResponseDto, roleList);
-                    _tokenProvider.SetToken(loginResponseDto.Token);
-
-                    UserLoginSessionsDto userLoginSessionsDto = new UserLoginSessionsDto();
-                    userLoginSessionsDto.SessionID = sessionId;
-                    userLoginSessionsDto.UserId = userid;
-                    userLoginSessionsDto.LoginEndpoint = "SSO";
-                    userLoginSessionsDto.LoginTime = DateTime.Now;
-                    userLoginSessionsDto.LastActivity = DateTime.Now;
-
-                    await _authService.SaveUserSession(userLoginSessionsDto);
-                    TempData["success"] = "Login successful";
-                    return RedirectToAction("Index", "Home");
-                }
-                else
-                {
-                    TempData["error"] = responseDto.Message;
-                    return RedirectToAction("Login", "AuthLogin");
-                }
-            }
-            TempData["error"] = "You are not a domain user. Please login the computer from domain credentials.";
-            return RedirectToAction("Login", "AuthLogin");
         }
         
         public async Task<IActionResult> Logout()
