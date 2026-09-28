@@ -12,6 +12,7 @@ namespace ConferenceBooking.Web.Service.IService
         //Task<ResponseDto?> GetUserRole(string Uid);
         //Task<ResponseDto?> AssignRoleAsync(ADRegistrationRequestDto registrationRequestDto);
         Task<ResponseDto?> PasswordChange(PasswordChangeDto model);
+        Task<ResponseDto?> GetUserRole(string Uid);
         Task<ResponseDto?> UpdateUserData(string userid, string displayName, string email, string phoneNumber);
         Task<ResponseDto?> SaveUserSession(UserLoginSessionsDto userLoginSessionsDto);
         Task<ResponseDto?> GetUserSession(Guid sessionId);
