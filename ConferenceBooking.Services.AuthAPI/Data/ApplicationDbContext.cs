@@ -32,6 +32,9 @@ namespace ConferenceBooking.Services.AuthAPI.Data
             modelBuilder.Entity<RegistrationRequest>()
                 .ToTable("Tbl_RegistrationRequest");
 
+            modelBuilder.Entity<UserLoginSessions>()
+                .ToTable("Tbl_UserLoginSessions");
+
             // Configure all custom relationships as logical
             // application-level references only.
             var foreignKeys = modelBuilder.Model

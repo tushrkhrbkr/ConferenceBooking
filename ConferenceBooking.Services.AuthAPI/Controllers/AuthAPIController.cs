@@ -59,25 +59,6 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
         
-        [HttpPost("loginbysso/{username}")]
-        public async Task<IActionResult> LoginBySSO(string username)
-        {
-            var loginResponse = await _authService.LoginBySSO(username);
-            if (loginResponse.User == null && loginResponse.Token == "")
-            {
-                _response.IsSuccess = false;
-                _response.Message = "Username not registered in the Database.";
-                return BadRequest(_response);
-            }
-            else if (loginResponse.User == null && loginResponse.Token == "block")
-            {
-                _response.IsSuccess = false;
-                _response.Message = "User is blocked. Please contact Administrator.";
-                return BadRequest(_response);
-            }
-            _response.Result = loginResponse;
-            return Ok(_response);
-        }
         
         [HttpPost("AssignRole")]
         public async Task<IActionResult> AssignRole([FromBody] RegistrationRequestDto model)
