@@ -31,7 +31,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     var _db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                     var now = DateTime.Now;
                     var cutoff = now - _timeout;
-                    var expiredSession = _db.Tbl_User_LoginSessions.Where(x => x.LogoutTime == null && x.LastActivity < cutoff).ToList();
+                    var expiredSession = _db.Tbl_UserLoginSessions.Where(x => x.LogoutTime == null && x.LastActivity < cutoff).ToList();
                     if (expiredSession.Count != 0)
                     {
                         foreach (var item in expiredSession)
@@ -41,7 +41,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                                 item.LogoutTime = DateTime.Now;
                                 item.LogoutReason = "SessionTimeout";
                                 UserLoginSessions obj = _mapper.Map<UserLoginSessions>(item);
-                                _db.Tbl_User_LoginSessions.Update(obj);
+                                _db.Tbl_UserLoginSessions.Update(obj);
                                 _db.SaveChanges();
                             }
                         }

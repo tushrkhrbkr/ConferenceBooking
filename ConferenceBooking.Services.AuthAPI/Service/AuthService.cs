@@ -43,7 +43,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             //if user found, Generate Jwt token
             var roles = await _userManager.GetRolesAsync(user);
             var token = _jwtTokenGenerator.GenerateToken(user,roles);
-            var displayName = _db.Tbl_User_Profile.FirstOrDefault(u => u.User_ID.ToLower() == user.Id.ToLower()).User_Agency;
+            var displayName = _db.Tbl_UserProfile.FirstOrDefault(u => u.DisplayName.ToLower() == user.Id.ToLower()).DisplayName;
 
             UserDto userDto = new()
             {
@@ -74,7 +74,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             //if user found, Generate Jwt token
             var roles = await _userManager.GetRolesAsync(user);
             var token = _jwtTokenGenerator.GenerateToken(user, roles);
-            var displayName = _db.Tbl_User_Profile.FirstOrDefault(u => u.User_ID.ToLower() == user.Id.ToLower()).User_Agency;
+            var displayName = _db.Tbl_UserProfile.FirstOrDefault(u => u.DisplayName.ToLower() == user.Id.ToLower()).DisplayName;
 
             UserDto userDto = new()
             {
@@ -169,7 +169,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             try
             {   
                 UserProfile obj = _mapper.Map<UserProfile>(profileRegistrationDto);
-                _db.Tbl_User_Profile.Add(obj);
+                _db.Tbl_UserProfile.Add(obj);
                 _db.SaveChanges();
                 _response.Result = _mapper.Map<UserProfileRegistrationDto>(obj);
                 
@@ -272,9 +272,9 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     var updateResult = await _userManager.UpdateAsync(userToUpdate);
                     if (updateResult.Succeeded)
                     {
-                        var obj=_db.Tbl_User_Profile.First(i=>i.User_ID==userid);
-                        obj.User_Agency = displayName;
-                        _db.Tbl_User_Profile.Update(obj);
+                        var obj=_db.Tbl_UserProfile.First(i=>i.UserId==userid);
+                        obj.DisplayName = displayName;
+                        _db.Tbl_UserProfile.Update(obj);
                         _db.SaveChanges();
                     }
                     else
@@ -303,7 +303,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             try
             {
                 UserLoginSessions obj = _mapper.Map<UserLoginSessions>(userLoginSessionsDto);
-                _db.Tbl_User_LoginSessions.Add(obj);
+                _db.Tbl_UserLoginSessions.Add(obj);
                 _db.SaveChanges();
                 _response.Result = _mapper.Map<UserLoginSessionsDto>(obj);
 
@@ -319,7 +319,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         
         public ResponseDto GetUserSession(Guid sessionId)
         {
-            var session = _db.Tbl_User_LoginSessions.FirstOrDefault(u => u.SessionID == sessionId);
+            var session = _db.Tbl_UserLoginSessions.FirstOrDefault(u => u.SessionID == sessionId);
             if (session != null)
             {
                 _response.Result = session;
@@ -337,7 +337,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             try
             {
                 UserLoginSessions obj = _mapper.Map<UserLoginSessions>(userLoginSessionsDto);
-                _db.Tbl_User_LoginSessions.Update(obj);
+                _db.Tbl_UserLoginSessions.Update(obj);
                 _db.SaveChanges();
                 _response.Result = _mapper.Map<UserLoginSessionsDto>(obj);
 
@@ -353,7 +353,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         
         public ResponseDto GetExpiredUserSession(TimeSpan _timeout)
         {
-            var expiredSession = _db.Tbl_User_LoginSessions.Where(x=> x.LogoutTime == null && x.LastActivity.Add(_timeout)<DateTime.Now).ToList();
+            var expiredSession = _db.Tbl_UserLoginSessions.Where(x=> x.LogoutTime == null && x.LastActivity.Add(_timeout)<DateTime.Now).ToList();
             if (expiredSession != null)
             {
                 _response.Result = expiredSession;
