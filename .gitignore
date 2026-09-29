@@ -4,4 +4,9 @@
 
 **/bin/
 **/obj/
-**/.vs/
+.vs/
+*.user
+*.suo
+**/logs/
+**/Logs/
+**/TestResults/

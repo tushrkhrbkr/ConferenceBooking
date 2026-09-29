@@ -13,9 +13,10 @@ namespace ConferenceBooking.Services.AuthAPI.Data
                 
         }
         public DbSet<ApplicationUser> ApplicationUsers { get; set; }
-        public DbSet<UserProfile> UserProfiles { get; set; }
-        public DbSet<RegistrationRequest> RegistrationRequests { get; set; }
-        public DbSet<Department> Departments { get; set; }
+        public DbSet<UserProfile> Tbl_UserProfile { get; set; }
+        public DbSet<RegistrationRequest> Tbl_RegistrationRequest { get; set; }
+        public DbSet<Department> Tbl_Department { get; set; }
+        public DbSet<UserLoginSessions> Tbl_UserLoginSessions { get; set; }
 
         protected override void OnModelCreating(
             ModelBuilder modelBuilder)
