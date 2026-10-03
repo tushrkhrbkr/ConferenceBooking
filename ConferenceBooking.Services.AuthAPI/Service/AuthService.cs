@@ -6,6 +6,7 @@ using ConferenceBooking.Services.AuthAPI.Models.Dto;
 using Microsoft.AspNetCore.Mvc;
 using ConferenceBooking.Services.AuthAPI.Models;
 using ConferenceBooking.Services.AuthAPI.Service.IService;
+using Microsoft.EntityFrameworkCore;
 
 namespace ConferenceBooking.Services.AuthAPI.Service
 {
@@ -43,38 +44,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             //if user found, Generate Jwt token
             var roles = await _userManager.GetRolesAsync(user);
             var token = _jwtTokenGenerator.GenerateToken(user,roles);
-            var displayName = _db.Tbl_UserProfile.FirstOrDefault(u => u.DisplayName.ToLower() == user.Id.ToLower()).DisplayName;
-
-            UserDto userDto = new()
-            {
-                ID = user.Id,
-                UserName = user.UserName,
-                Email = user.Email,
-                DisplayName = displayName
-            };
-            LoginResponseDto loginResponseDto = new()
-            {
-                User = userDto,
-                Token = token
-            };
-            return loginResponseDto;
-        }
-        
-        public async Task<LoginResponseDto> LoginBySSO(string username)
-        {
-            var user = _db.ApplicationUsers.FirstOrDefault(u => u.UserName.ToLower() == username.ToLower());            
-            if (user == null)
-            {
-                return new LoginResponseDto() { User = null, Token = "" };
-            }
-            if (await _userManager.IsLockedOutAsync(user))
-            {
-                return new LoginResponseDto() { User = null, Token = "block" };
-            }
-            //if user found, Generate Jwt token
-            var roles = await _userManager.GetRolesAsync(user);
-            var token = _jwtTokenGenerator.GenerateToken(user, roles);
-            var displayName = _db.Tbl_UserProfile.FirstOrDefault(u => u.DisplayName.ToLower() == user.Id.ToLower()).DisplayName;
+            var displayName = _db.Tbl_UserProfile.FirstOrDefault(u => u.UserId.ToLower() == user.Id.ToLower()).DisplayName;
 
             UserDto userDto = new()
             {
@@ -91,99 +61,132 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return loginResponseDto;
         }
 
-        public async Task<(string,string)> Register(RegistrationRequestDto registrationRequestDto)
+        public async Task<ResponseDto> RequestRegistration(RegistrationRequestDto newrequest)
         {
-            ApplicationUser user = new()
+            try
             {
-                //Id=registrationRequestDto.UserID,
-                UserName = registrationRequestDto.UserName,
-                Email = registrationRequestDto.Email,
-                NormalizedEmail = registrationRequestDto.Email.ToUpper(),
-                PhoneNumber=registrationRequestDto.ContactNumber
-            };
-            if (registrationRequestDto.UserID == "" || registrationRequestDto.UserID == null)
+                RegistrationRequest obj = _mapper.Map<RegistrationRequest>(newrequest);
+                _db.Tbl_RegistrationRequest.Add(obj);
+                _db.SaveChanges();
+                _response.Result = _mapper.Map<RegistrationRequestDto>(obj);
+
+            }
+            catch (Exception ex)
             {
+                _response.IsSuccess = false;
+                _response.Message = ex.Message;
+
+            }
+            return _response;
+        }
+
+        public async Task<ResponseDto> ApproveRegistration(ApproveRegistrationDto approveRequest)
+        {
+            var existingRequest = await _db.Tbl_RegistrationRequest.FirstOrDefaultAsync(u => u.RegistrationRequestId == approveRequest.RegistrationRequestId);
+
+            if (existingRequest != null)
+            {
+                RegistrationRequestDto registrationRequestDto = _mapper.Map<RegistrationRequestDto>(existingRequest);
+                ApplicationUser user = new()
+                {
+                    //Id=registrationRequestDto.UserID,
+                    UserName = registrationRequestDto.Username,
+                    Email = registrationRequestDto.Email,
+                    NormalizedEmail = registrationRequestDto.Email.ToUpper(),
+                    PhoneNumber = registrationRequestDto.MobileNumber
+                };
+
                 try
                 {
                     var result = await _userManager.CreateAsync(user, registrationRequestDto.Password);
 
                     if (result.Succeeded)
                     {
-                        var createdUser = await _userManager.FindByNameAsync(registrationRequestDto.UserName);
-                        return ("", createdUser.Id);
+                        var createdUser = await _userManager.FindByNameAsync(registrationRequestDto.Username);
+
+                        existingRequest.RequestStatus = Enums.RegistrationRequestStatus.Approved;
+                        existingRequest.ReviewedAtUtc = DateTime.UtcNow;
+                        existingRequest.ReviewedByUserId = approveRequest.ReviewedByUserId;
+                        existingRequest.ReviewRemarks = approveRequest.Remarks;
+
+                        await _db.SaveChangesAsync();
+
+                        UserProfileDto newUser = new()
+                        {
+                            UserId = createdUser.Id,
+                            Username = registrationRequestDto.Username,
+                            DisplayName = registrationRequestDto.DisplayName,
+                            Designation = registrationRequestDto.Designation,
+                            EmailAddress = registrationRequestDto.Email,
+                            MobileNumber = registrationRequestDto.MobileNumber,
+                            DeskPhone = registrationRequestDto.DeskPhone,
+                            DepartmentId = approveRequest.DepartmentId,
+                            IsActive = true
+                        };
+
+
+                        UserProfile obj = _mapper.Map<UserProfile>(newUser);
+                        _db.Tbl_UserProfile.Add(obj);
+                        _db.SaveChanges();
+
+                        await AssignRole(createdUser.UserName, approveRequest.RoleName);
+                        _response.Result = _mapper.Map<UserProfileDto>(obj);
+                        _response.Message = "User created successfully";
+
                     }
                     else
                     {
-                        return (result.Errors.FirstOrDefault().Description, "");
+                        _response.IsSuccess = false;
+                        _response.Message = result.Errors.FirstOrDefault().Description;
+                   
                     }
                 }
                 catch (Exception ex)
                 {
-                    return ("Error Encountered", ex.Message);
+                    _response.IsSuccess = false;
+                    _response.Message = ex.Message;
                 }
+
             }
             else
             {
-                try
-                {
-                    // Finding the user based on userid
-                    var userToUpdate= await _userManager.FindByIdAsync(registrationRequestDto.UserID);
-                    // Update UserName and other details
-                    userToUpdate.UserName = registrationRequestDto.UserName;
-                    userToUpdate.Email = registrationRequestDto.Email;
-                    userToUpdate.NormalizedEmail = registrationRequestDto.Email.ToUpper();
-                    userToUpdate.PhoneNumber = registrationRequestDto.ContactNumber;
-
-                    //Update password
-                    var newPassword = registrationRequestDto.Password;
-                    var token= await _userManager.GeneratePasswordResetTokenAsync(userToUpdate);
-                    var passwordChangeResult = await _userManager.ResetPasswordAsync(userToUpdate, token, newPassword);                   
-
-                    if (passwordChangeResult.Succeeded)
-                    {
-                        var updateResult = await _userManager.UpdateAsync(userToUpdate);
-                        if (updateResult.Succeeded)
-                        {
-                            var updatedUser = await _userManager.FindByNameAsync(registrationRequestDto.UserName);
-                            return ("", updatedUser.Id);
-                        }
-                        else
-                        {
-                            return (updateResult.Errors.FirstOrDefault().Description, "");
-                        }
-                    }
-                    else
-                    {
-                        return (passwordChangeResult.Errors.FirstOrDefault().Description, "");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    return ("Error Encountered", ex.Message);
-                }
-            }                        
-        }
-        
-        public ResponseDto UserProfileRegister(UserProfileRegistrationDto profileRegistrationDto)
-        {
-            try
-            {   
-                UserProfile obj = _mapper.Map<UserProfile>(profileRegistrationDto);
-                _db.Tbl_UserProfile.Add(obj);
-                _db.SaveChanges();
-                _response.Result = _mapper.Map<UserProfileRegistrationDto>(obj);
-                
-            }
-            catch(Exception ex)
-            {
                 _response.IsSuccess = false;
-                _response.Message = ex.Message;
-                
+                _response.Message = "Error accessing current request";
             }
             return _response;
         }
         
+        public async Task<ResponseDto> RejectRegistration(RejectRegistrationDto rejectRequest)
+        {
+            var existingRequest = await _db.Tbl_RegistrationRequest.FirstOrDefaultAsync(u => u.RegistrationRequestId == rejectRequest.RegistrationRequestId);
 
+            if (existingRequest != null)
+            {
+                try
+                {
+                    existingRequest.RequestStatus = Enums.RegistrationRequestStatus.Rejected;
+                    existingRequest.ReviewedAtUtc = DateTime.UtcNow;
+                    existingRequest.ReviewedByUserId = rejectRequest.ReviewedByUserId;
+                    existingRequest.ReviewRemarks = rejectRequest.Remarks;
+                    await _db.SaveChangesAsync();
+
+                    _response.Message = "Request rejection successful";
+                }
+                catch (Exception ex)
+                {
+                    _response.IsSuccess = false;
+                    _response.Message = ex.Message;
+                }
+
+            }
+            else
+            {
+                _response.IsSuccess = false;
+                _response.Message = "Error accessing current request";
+            }
+            return _response;
+        }
+               
         public async Task<bool> AssignRole(string username, string roleName)
         {            
             var user = _db.ApplicationUsers.FirstOrDefault(u => u.UserName.ToLower() == username.ToLower());
@@ -259,21 +262,21 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return _response;
         }
         
-        public async Task<ResponseDto> UpdateUserData(string userid, string displayName, string email, string phoneNumber)
+        public async Task<ResponseDto> UpdateUserData(string userid, string displayName, string phoneNumber)
         {
             var userToUpdate = await _userManager.FindByIdAsync(userid);
             if (userToUpdate != null)
             {
                 try
                 {
-                    userToUpdate.Email = email;
-                    userToUpdate.NormalizedEmail = email.ToUpper();
+                    
                     userToUpdate.PhoneNumber = phoneNumber;
                     var updateResult = await _userManager.UpdateAsync(userToUpdate);
                     if (updateResult.Succeeded)
                     {
                         var obj=_db.Tbl_UserProfile.First(i=>i.UserId==userid);
                         obj.DisplayName = displayName;
+                        obj.MobileNumber = phoneNumber;
                         _db.Tbl_UserProfile.Update(obj);
                         _db.SaveChanges();
                     }

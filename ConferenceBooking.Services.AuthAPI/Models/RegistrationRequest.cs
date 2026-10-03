@@ -16,6 +16,8 @@ namespace ConferenceBooking.Services.AuthAPI.Models
 
         public string RequestedMobile { get; set; } = string.Empty;
 
+        public string RequestedDeskPhone {  get; set; } = string.Empty;
+
         public int? RequestedDepartmentId { get; set; }
 
         public string? RequestedRoleCode { get; set; }

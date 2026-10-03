@@ -10,8 +10,10 @@ namespace ConferenceBooking.Services.AuthAPI
         {
             var mappingConfig = new MapperConfiguration(config =>
             {
-                config.CreateMap<UserProfile, UserProfileRegistrationDto>().ReverseMap();
+                config.CreateMap<UserProfile, UserProfileDto>().ReverseMap();
                 config.CreateMap<UserLoginSessions, UserLoginSessionsDto>().ReverseMap();
+                config.CreateMap<Department, DepartmentDto>().ReverseMap();
+                config.CreateMap<RegistrationRequest, RegistrationRequestDto>().ReverseMap();
             });
             return mappingConfig;
         }
