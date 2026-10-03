@@ -23,22 +23,34 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             _db = db;
             _mapper= mapper;           
         }
+
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegistrationRequestDto model)
         {
-            var result = await _authService.Register(model);
-            string errorMessage = result.Item1;
-            string userId = result.Item2;
-            if (!string.IsNullOrEmpty(errorMessage))
-            {
-                _response.IsSuccess = false;
-                _response.Message = errorMessage;
-                return BadRequest(_response);
-            }
-            _response.Result = userId;
+
+            _response = await _authService.RequestRegistration(model);
+
             return Ok(_response);
         }
-       
+
+        [HttpPost("approve")]
+        public async Task<IActionResult> Approve([FromBody] ApproveRegistrationDto model)
+        {
+
+            _response = await _authService.ApproveRegistration(model);
+
+            return Ok(_response);
+        }
+
+        [HttpPost("reject")]
+        public async Task<IActionResult> Reject([FromBody] RejectRegistrationDto model)
+        {
+
+            _response = await _authService.RejectRegistration(model);
+
+            return Ok(_response);
+        }
+
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequestDto model)
         {
@@ -61,9 +73,9 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
         
         
         [HttpPost("AssignRole")]
-        public async Task<IActionResult> AssignRole([FromBody] RegistrationRequestDto model)
+        public async Task<IActionResult> AssignRole([FromBody] ManageRoleDto model)
         {
-            var assignRoleSuccessful = await _authService.AssignRole(model.UserName, model.Role);
+            var assignRoleSuccessful = await _authService.AssignRole(model.UserName, model.RoleName);
             if (!assignRoleSuccessful)
             {
                 _response.IsSuccess = false;
@@ -74,23 +86,10 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
         }
 
         [HttpPost("RevokeRole")]
-        public async Task<IActionResult> RevokeRole([FromBody] RegistrationRequestDto model)
+        public async Task<IActionResult> RevokeRole([FromBody] ManageRoleDto model)
         {
-            var assignRoleSuccessful = await _authService.AssignRole(model.UserName, model.Role);
+            var assignRoleSuccessful = await _authService.AssignRole(model.UserName, model.RoleName);
             if (!assignRoleSuccessful)
-            {
-                _response.IsSuccess = false;
-                _response.Message = "Error Encountered";
-                return BadRequest(_response);
-            }
-            return Ok(_response);
-        }
-
-        [HttpPost("UserProfileRegister")]
-        public IActionResult UserProfileRegister([FromBody] UserProfileDto model)
-        {
-            var UserProfileSuccessful = _authService.UserProfileRegister(model);
-            if (UserProfileSuccessful.Result==null)
             {
                 _response.IsSuccess = false;
                 _response.Message = "Error Encountered";
@@ -134,7 +133,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
         [HttpPost("updateuserdata/{userid}/{displayName}/{email}/{phoneNumber}")]
         public async Task<IActionResult> UpdateUserData(string userid, string displayName, string email, string phoneNumber)
         {
-            var response = await _authService.UpdateUserData(userid, displayName, email, phoneNumber);
+            var response = await _authService.UpdateUserData(userid, displayName, phoneNumber);
             if (response.Result == null && !response.IsSuccess)
             {
                 _response.IsSuccess = false;
