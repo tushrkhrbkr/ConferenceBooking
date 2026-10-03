@@ -20,11 +20,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IMapper _mapper;
 
-        public AuthService(ApplicationDbContext db,UserManager<ApplicationUser> userManager,RoleManager<IdentityRole>roleManager, IJwtTokenGenerator jwtTokenGenerator, IMapper mapper)
+        public AuthService(ApplicationDbContext db,UserManager<ApplicationUser> userManager,SignInManager<ApplicationUser> signInManager,RoleManager<IdentityRole>roleManager, IJwtTokenGenerator jwtTokenGenerator, IMapper mapper)
         {
             _db = db;
             _response = new ResponseDto();
             _userManager = userManager;
+            _signinManager = signInManager;
             _roleManager = roleManager;
             _jwtTokenGenerator = jwtTokenGenerator;
             _mapper = mapper;
