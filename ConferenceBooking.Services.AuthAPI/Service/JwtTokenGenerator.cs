@@ -31,7 +31,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 Audience = _jwtOptions.Audience,
                 Issuer = _jwtOptions.Issuer,
                 Subject = new ClaimsIdentity(claimsList),
-                Expires=DateTime.Now.AddDays(7),
+                Expires= DateTime.UtcNow.AddMinutes(_jwtOptions.ExpirationMinutes),
                 SigningCredentials=new SigningCredentials(new SymmetricSecurityKey(key),SecurityAlgorithms.HmacSha256Signature)
             };
             var token = tokenHandler.CreateToken(tokenDescriptor);

@@ -88,8 +88,8 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
         [HttpPost("RevokeRole")]
         public async Task<IActionResult> RevokeRole([FromBody] ManageRoleDto model)
         {
-            var assignRoleSuccessful = await _authService.AssignRole(model.UserName, model.RoleName);
-            if (!assignRoleSuccessful)
+            var revokRoleSuccessful = await _authService.RevokeRole(model.UserName, model.RoleName);
+            if (!revokRoleSuccessful)
             {
                 _response.IsSuccess = false;
                 _response.Message = "Error Encountered";
