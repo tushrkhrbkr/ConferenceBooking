@@ -1,8 +1,6 @@
-﻿using System.ComponentModel.DataAnnotations;
-
-namespace ConferenceBooking.Services.AuthAPI.Models
+﻿namespace ConferenceBooking.Services.AuthAPI.Models.Dto
 {
-    public class UserProfile
+    public class UserProfileDto
     {
         public int Id { get; set; }
 
@@ -18,7 +16,7 @@ namespace ConferenceBooking.Services.AuthAPI.Models
 
         public string MobileNumber { get; set; } = string.Empty;
 
-        public string DeskPhone {  get; set; } = string.Empty;
+        public string DeskPhone { get; set; } = string.Empty;
 
         public int? DepartmentId { get; set; }
 
@@ -29,6 +27,5 @@ namespace ConferenceBooking.Services.AuthAPI.Models
         public DateTime? UpdatedAtUtc { get; set; }
 
         public byte[] RowVersion { get; set; } = Array.Empty<byte>();
-
     }
 }

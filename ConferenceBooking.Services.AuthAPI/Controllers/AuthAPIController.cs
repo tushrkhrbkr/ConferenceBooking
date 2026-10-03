@@ -87,7 +87,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
         }
 
         [HttpPost("UserProfileRegister")]
-        public IActionResult UserProfileRegister([FromBody] UserProfileRegistrationDto model)
+        public IActionResult UserProfileRegister([FromBody] UserProfileDto model)
         {
             var UserProfileSuccessful = _authService.UserProfileRegister(model);
             if (UserProfileSuccessful.Result==null)
