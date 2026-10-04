@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace ConferenceBooking.Services.AuthAPI.Controllers
 {
-    [Authorize]
+    
     [Route("api/auth")]
     [ApiController]
     public class AuthAPIController : ControllerBase
@@ -35,6 +35,16 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
+        [HttpPost("check-duplicate")]
+        public async Task<IActionResult> CheckRegistrationDuplicate([FromBody] RegistrationDuplicateCheckDto model)
+        {
+            _response = await _authService.CheckRegistrationAsync(model);
+
+            return Ok(_response);
+        }
+
+
+        [Authorize]
         [HttpPost("approve")]
         public async Task<IActionResult> Approve([FromBody] ApproveRegistrationDto model)
         {
@@ -43,7 +53,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
 
             return Ok(_response);
         }
-
+        [Authorize]
         [HttpPost("reject")]
         public async Task<IActionResult> Reject([FromBody] RejectRegistrationDto model)
         {
@@ -72,8 +82,8 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             _response.Result = loginResponse;
             return Ok(_response);
         }
-        
-        
+
+        [Authorize]
         [HttpPost("AssignRole")]
         public async Task<IActionResult> AssignRole([FromBody] ManageRoleDto model)
         {
@@ -87,6 +97,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
+        [Authorize]
         [HttpPost("RevokeRole")]
         public async Task<IActionResult> RevokeRole([FromBody] ManageRoleDto model)
         {
@@ -99,8 +110,8 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             }
             return Ok(_response);
         }
-           
 
+        [Authorize]
         [HttpGet("GetUserRole/{Uid}")]
         public IActionResult GetUserRole(string Uid)
         {
@@ -117,7 +128,8 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
                 return Ok(_response);
             }
         }
-        
+
+        [Authorize]
         [HttpPost("changePassword")]
         public async Task<IActionResult> PasswordChange([FromBody] PasswordChangeDto model)
         {
@@ -131,7 +143,8 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             _response.Result = changePpResponse.Result;
             return Ok(_response);
         }
-        
+
+        [Authorize]
         [HttpPost("updateuserdata/{userid}/{displayName}/{email}/{phoneNumber}")]
         public async Task<IActionResult> UpdateUserData(string userid, string displayName, string email, string phoneNumber)
         {

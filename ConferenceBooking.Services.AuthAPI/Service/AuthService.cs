@@ -455,14 +455,19 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         {
             try
             {
+                var Result = new RegistrationDuplicateResultDto();
+
                 if (newRequest == null || string.IsNullOrWhiteSpace(newRequest.Email))
                 {
-                    _response.Result = new RegistrationDuplicateResultDto
+                    Result = new RegistrationDuplicateResultDto
                     {
                         Status = RegistrationDuplicateStatus.RegistrationBlocked,
                         CanRegister = false,
                         Message = "Email address is required."
                     };
+
+                    _response.Result = Result;
+                    _response.Message  = Result.Message;
                 }
 
                 var email = newRequest.Email.Trim().ToLowerInvariant();
@@ -471,12 +476,14 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (atIndex <= 0 || atIndex == email.Length - 1)
                 {
-                    _response.Result = new RegistrationDuplicateResultDto
+                    Result = new RegistrationDuplicateResultDto
                     {
                         Status = RegistrationDuplicateStatus.RegistrationBlocked,
                         CanRegister = false,
                         Message = "A valid email address is required."
                     };
+                    _response.Result = Result;
+                    _response.Message = Result.Message;
                 }
 
                 // Username is ALWAYS derived from email.
@@ -527,7 +534,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     // -----------------------------------------------------
                     if (profile != null && profile.IsActive)
                     {
-                        _response.Result = new RegistrationDuplicateResultDto
+                        Result = new RegistrationDuplicateResultDto
                         {
                             Status =  RegistrationDuplicateStatus.AccountExists,
 
@@ -540,6 +547,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                             Message = "An account with this email address already exists. " +
                                       "Please use the Forgot Password option."
                         };
+                        _response.Result = Result;
+                        _response.Message = Result.Message;
                     }
 
                     // -----------------------------------------------------
@@ -547,7 +556,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     // -----------------------------------------------------
                     if (pendingRequest != null)
                     {
-                        _response.Result = new RegistrationDuplicateResultDto
+                        Result = new RegistrationDuplicateResultDto
                         {
                             Status = RegistrationDuplicateStatus.RegistrationPending,
 
@@ -561,6 +570,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                             Message = "A registration request for this account is already pending."
                         };
+                        _response.Result = Result;
+                        _response.Message = Result.Message;
                     }
 
                     // -----------------------------------------------------
@@ -568,7 +579,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     // is inconsistent.
                     // Do NOT allow another account to be created.
                     // -----------------------------------------------------
-                    _response.Result = new RegistrationDuplicateResultDto
+                    Result = new RegistrationDuplicateResultDto
                     {
                         Status = RegistrationDuplicateStatus.RegistrationBlocked,
 
@@ -583,6 +594,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                             "registration state could not be determined. " +
                             "Please contact the Administrator."
                     };
+                    _response.Result = Result;
+                    _response.Message = Result.Message;
 
                     // ---------------------------------------------------------
                     // 5. No Identity user, but pending request exists.
@@ -590,7 +603,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     // ---------------------------------------------------------
                     if (pendingRequest != null)
                     {
-                        _response.Result = new RegistrationDuplicateResultDto
+                        Result = new RegistrationDuplicateResultDto
                         {
                             Status = RegistrationDuplicateStatus.RegistrationPending,
 
@@ -604,13 +617,15 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                             Message = "A registration request for this email address is already pending."
                         };
+                        _response.Result = Result;
+                        _response.Message = Result.Message;
                     }
 
 
                     // ---------------------------------------------------------
                     // 6. No duplicate
                     // ---------------------------------------------------------
-                    _response.Result = new RegistrationDuplicateResultDto
+                    Result = new RegistrationDuplicateResultDto
                     {
                         Status = RegistrationDuplicateStatus.None,
 
@@ -622,6 +637,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                         Message = "Registration is available."
                     };
+                    _response.Result = Result;
+                    _response.Message = Result.Message;
                 }
 
             }
