@@ -19,6 +19,8 @@ namespace ConferenceBooking.Services.AuthAPI.Data
         public DbSet<UserLoginSessions> Tbl_UserLoginSessions { get; set; }
         public DbSet<PasswordReset> Tbl_PasswordReset { get; set; }
 
+        public DbSet<EmailNotificationOutbox> Tbl_EmailNotificationOutbox { get; set; }
+
         protected override void OnModelCreating(
             ModelBuilder modelBuilder)
         {
@@ -38,6 +40,8 @@ namespace ConferenceBooking.Services.AuthAPI.Data
 
             modelBuilder.Entity<PasswordReset>()
                 .ToTable("Tbl_PasswordReset");
+
+            modelBuilder.Entity<EmailNotificationOutbox>().ToTable("Tbl_EmailNotificationOutbox");
         }
 
     }

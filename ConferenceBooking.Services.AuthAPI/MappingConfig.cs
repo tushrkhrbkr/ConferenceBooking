@@ -14,6 +14,8 @@ namespace ConferenceBooking.Services.AuthAPI
                 config.CreateMap<UserLoginSessions, UserLoginSessionsDto>().ReverseMap();
                 config.CreateMap<Department, DepartmentDto>().ReverseMap();
                 config.CreateMap<RegistrationRequest, RegistrationRequestDto>().ReverseMap();
+                config.CreateMap<PasswordReset, PasswordResetDto>().ReverseMap();
+                config.CreateMap<EmailNotificationOutbox, EmailNotificationOutboxDto>().ReverseMap()
             });
             return mappingConfig;
         }
