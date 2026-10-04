@@ -2,16 +2,20 @@ using AutoMapper;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
-using MUS.Services.PasswordReset;
-using MUS.Services.PasswordReset.Data;
-using MUS.Services.PasswordReset.Extensions;
-using MUS.Services.PasswordReset.Service;
-using MUS.Services.PasswordReset.Service.IService;
+using ConferenceBooking.Services.EmailAPI;
+using ConferenceBooking.Services.EmailAPI.Data;
+using ConferenceBooking.Services.EmailAPI.Service;
+using ConferenceBooking.Services.EmailAPI.Service.IService;
+using ConferenceBooking.Services.EmailAPI.Models;
+using ConferenceBooking.Services.EmailAPI.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
+builder.Services.Configure<EmailSettings>(
+    builder.Configuration.GetSection("EmailSettings"));
+
 builder.Services.AddDbContext<ApplicationDbContext>(Options => Options.UseSqlServer(
     builder.Configuration.GetConnectionString("DefaultConnection")
     ));
