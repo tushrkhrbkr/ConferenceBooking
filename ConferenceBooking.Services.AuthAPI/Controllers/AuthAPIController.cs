@@ -5,9 +5,11 @@ using ConferenceBooking.Services.AuthAPI.Data;
 using ConferenceBooking.Services.AuthAPI.Models;
 using ConferenceBooking.Services.AuthAPI.Models.Dto;
 using ConferenceBooking.Services.AuthAPI.Service.IService;
+using Microsoft.AspNetCore.Authorization;
 
 namespace ConferenceBooking.Services.AuthAPI.Controllers
 {
+    [Authorize]
     [Route("api/auth")]
     [ApiController]
     public class AuthAPIController : ControllerBase

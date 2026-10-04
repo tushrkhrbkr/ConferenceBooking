@@ -7,7 +7,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service.IService
     {
         Task<LoginResponseDto> Login(LoginRequestDto loginRequestDto);
 
-        Task<ResponseDto> RequestRegistration(RegistrationRequestDto registrationRequestDto);
+        Task<ResponseDto> RequestRegistration(RegistrationRequestDto newRequest);
         Task<ResponseDto> ApproveRegistration(ApproveRegistrationDto approveRequest);
         Task<ResponseDto> RejectRegistration(RejectRegistrationDto rejectRequest);
        
@@ -25,5 +25,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service.IService
         ResponseDto UpdateUserSession(UserLoginSessionsDto userLoginSessionsDto);
 
         ResponseDto GetExpiredUserSession(TimeSpan _timeout);
+
+        Task<ResponseDto> CheckRegistrationAsync(RegistrationDuplicateCheckDto newRequest);
     }
 }
