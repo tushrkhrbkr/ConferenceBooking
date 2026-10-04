@@ -144,6 +144,30 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
+        [AllowAnonymous]
+        [HttpPost("password/forgot")]
+        public async Task<IActionResult> ForgotPassword([FromBody] PasswordResetRequestDto request)
+        {
+            _response = await _authService.ForgotPasswordAsync(request);
+            return Ok(_response);
+        }
+
+        [AllowAnonymous]
+        [HttpPost("password/verify-otp")]
+        public async Task<IActionResult> VerifyPasswordResetOtp([FromBody] PasswordResetVerifyOtpDto request)
+        {
+            _response = await _authService.VerifyPasswordResetOtpAsync(request);
+            return Ok(_response);
+        }
+
+        [AllowAnonymous]
+        [HttpPost("password/reset")]
+        public async Task<IActionResult> ResetPassword([FromBody] PasswordResetCompleteDto request)
+        {
+            _response = await _authService.ResetPasswordAsync(request);
+            return Ok(_response);
+        }
+
         [Authorize]
         [HttpPost("updateuserdata/{userid}/{displayName}/{phoneNumber}")]
         public async Task<IActionResult> UpdateUserData(string userid, string displayName, string phoneNumber)

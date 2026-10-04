@@ -27,5 +27,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service.IService
         ResponseDto GetExpiredUserSession(TimeSpan _timeout);
 
         Task<ResponseDto> CheckRegistrationAsync(RegistrationDuplicateCheckDto newRequest);
+
+        Task<ResponseDto> ForgotPasswordAsync(PasswordResetRequestDto request);
+
+        Task<ResponseDto> VerifyPasswordResetOtpAsync(PasswordResetVerifyOtpDto request);
+
+        Task<ResponseDto> ResetPasswordAsync(PasswordResetCompleteDto request);
     }
 }

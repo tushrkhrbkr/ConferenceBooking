@@ -21,8 +21,10 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         private readonly IJwtTokenGenerator _jwtTokenGenerator;
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IMapper _mapper;
+        private readonly IOtpService _otpService;
+        private readonly IPasswordResetTokenService _passwordResetTokenService;
 
-        public AuthService(ApplicationDbContext db,UserManager<ApplicationUser> userManager,SignInManager<ApplicationUser> signInManager,RoleManager<IdentityRole>roleManager, IJwtTokenGenerator jwtTokenGenerator, IMapper mapper)
+        public AuthService(ApplicationDbContext db,UserManager<ApplicationUser> userManager,SignInManager<ApplicationUser> signInManager,RoleManager<IdentityRole>roleManager, IJwtTokenGenerator jwtTokenGenerator, IMapper mapper, IOtpService otpService, IPasswordResetTokenService passwordResetTokenService)
         {
             _db = db;
             _response = new ResponseDto();
@@ -31,6 +33,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             _roleManager = roleManager;
             _jwtTokenGenerator = jwtTokenGenerator;
             _mapper = mapper;
+            _otpService = otpService;
+            _passwordResetTokenService = passwordResetTokenService;
         }
 
         public async Task<LoginResponseDto> Login(LoginRequestDto loginRequestDto)
@@ -1197,6 +1201,415 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 _response.IsSuccess = false;
                 _response.Message = "No user found!!!";
             }
+            return _response;
+        }
+
+        public async Task<ResponseDto> ForgotPasswordAsync(PasswordResetRequestDto request)
+        {
+            /*
+             * IMPORTANT:
+             * Never reveal whether the supplied email exists.
+             */
+
+            const string genericMessage =
+                "If an account exists for this email address, " +
+                "an OTP has been sent.";
+
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.Email))
+            {
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+
+            var email = request.Email
+                .Trim()
+                .ToLowerInvariant();
+
+            // ---------------------------------------------------------
+            // Validate basic email structure
+            // ---------------------------------------------------------
+
+            var atIndex = email.IndexOf('@');
+
+            if (atIndex <= 0 ||
+                atIndex == email.Length - 1)
+            {
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Find Identity user
+            // ---------------------------------------------------------
+
+            var user = await _userManager
+                .FindByEmailAsync(email);
+
+            if (user == null)
+            {
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Validate application profile
+            // ---------------------------------------------------------
+
+            var profile = await _db.Tbl_UserProfile
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x =>
+                    x.UserId == user.Id &&
+                    x.EmailAddress == email);
+
+            if (profile == null || !profile.IsActive)
+            {
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Resend cooldown
+            // ---------------------------------------------------------
+
+            var cooldownFromUtc =
+                DateTime.UtcNow.AddSeconds(-60);
+
+            var recentRequest =
+                await _db.Tbl_PasswordReset
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.UserId == user.Id &&
+                        x.CreatedAtUtc >= cooldownFromUtc &&
+                        x.ConsumedAtUtc == null)
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefaultAsync();
+
+            if (recentRequest != null)
+            {
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Generate OTP
+            // ---------------------------------------------------------
+
+            var otp = _otpService.GenerateOtp();
+
+            var otpHash = _otpService.HashOtp(otp);
+
+            var passwordReset = new PasswordReset
+            {
+                UserId = user.Id,
+
+                EmailAddress = email,
+
+                OtpHash = otpHash,
+
+                OtpExpiresAtUtc =
+                    DateTime.UtcNow.AddMinutes(5),
+
+                OtpAttemptCount = 0,
+
+                OtpMaxAttempts = 5,
+
+                CreatedAtUtc = DateTime.UtcNow,
+
+                RequestedIpAddress = request.IpAddress,
+            };
+
+            await _db.Tbl_PasswordReset
+                .AddAsync(passwordReset);
+
+            await _db.SaveChangesAsync();
+
+            /*
+             * EmailAPI integration will be added in Part 2.
+             *
+             * DO NOT return the OTP to WebApp.
+             */
+
+            _response.IsSuccess = true;
+            _response.Message = genericMessage;
+            _response.Result = null;
+
+            return _response;
+        }
+
+        public async Task<ResponseDto> VerifyPasswordResetOtpAsync(PasswordResetVerifyOtpDto request)
+        {
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.Email) ||
+                string.IsNullOrWhiteSpace(request.Otp))
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Email address and OTP are required.";
+
+                return _response;
+            }
+
+            var email = request.Email
+                .Trim()
+                .ToLowerInvariant();
+
+            var otp = request.Otp.Trim();
+
+            if (otp.Length != 6 ||
+                !otp.All(char.IsDigit))
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid OTP.";
+
+                return _response;
+            }
+
+            var resetRequest =
+                await _db.Tbl_PasswordReset
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefaultAsync(x =>
+                        x.EmailAddress == email &&
+                        x.ConsumedAtUtc == null);
+
+            if (resetRequest == null)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired OTP.";
+
+                return _response;
+            }
+
+            if (resetRequest.OtpVerifiedAtUtc != null)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "OTP has already been verified.";
+
+                return _response;
+            }
+
+            if (resetRequest.OtpExpiresAtUtc <= DateTime.UtcNow)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "OTP has expired.";
+
+                return _response;
+            }
+
+            if (resetRequest.OtpAttemptCount >=
+                resetRequest.OtpMaxAttempts)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Maximum OTP attempts exceeded.";
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Increment attempt BEFORE comparison
+            // ---------------------------------------------------------
+
+            resetRequest.OtpAttemptCount++;
+
+            var suppliedHash =
+                _otpService.HashOtp(otp);
+
+            if (!string.Equals(
+                    suppliedHash,
+                    resetRequest.OtpHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await _db.SaveChangesAsync();
+
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired OTP.";
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // OTP correct
+            // ---------------------------------------------------------
+
+            resetRequest.OtpVerifiedAtUtc =
+                DateTime.UtcNow;
+
+            resetRequest.VerifiedIpAddress =
+                request.IpAddress;
+
+            var resetToken =
+                _passwordResetTokenService.GenerateToken();
+
+            resetRequest.ResetTokenHash =
+                _passwordResetTokenService
+                    .HashToken(resetToken);
+
+            resetRequest.ResetTokenExpiresAtUtc =
+                DateTime.UtcNow.AddMinutes(10);
+
+            await _db.SaveChangesAsync();
+
+            _response.IsSuccess = true;
+            _response.Message =
+                "OTP verified successfully.";
+
+            _response.Result = new
+            {
+                ResetToken = resetToken
+            };
+
+            return _response;
+        }
+
+        public async Task<ResponseDto> ResetPasswordAsync(PasswordResetCompleteDto request)
+        {
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.ResetToken) ||
+                string.IsNullOrWhiteSpace(request.NewPassword) ||
+                string.IsNullOrWhiteSpace(request.ConfirmPassword))
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "All password reset fields are required.";
+
+                return _response;
+            }
+
+            if (request.NewPassword !=
+                request.ConfirmPassword)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Passwords do not match.";
+
+                return _response;
+            }
+
+            var tokenHash =
+                _passwordResetTokenService
+                    .HashToken(request.ResetToken);
+
+            var resetRequest =
+                await _db.Tbl_PasswordReset
+                    .FirstOrDefaultAsync(x =>
+                        x.ResetTokenHash == tokenHash &&
+                        x.ConsumedAtUtc == null);
+
+            if (resetRequest == null)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired reset token.";
+
+                return _response;
+            }
+
+            if (resetRequest.OtpVerifiedAtUtc == null)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "OTP verification is required.";
+
+                return _response;
+            }
+
+            if (resetRequest.ResetTokenExpiresAtUtc == null ||
+                resetRequest.ResetTokenExpiresAtUtc <= DateTime.UtcNow)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired reset token.";
+
+                return _response;
+            }
+
+            var user =
+                await _userManager.FindByIdAsync(
+                    resetRequest.UserId);
+
+            if (user == null)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Password reset could not be completed.";
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Reset Identity password
+            // ---------------------------------------------------------
+
+            var removePasswordResult =
+                await _userManager.RemovePasswordAsync(user);
+
+            if (!removePasswordResult.Succeeded)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Password reset could not be completed.";
+
+                return _response;
+            }
+
+            var addPasswordResult =
+                await _userManager.AddPasswordAsync(
+                    user,
+                    request.NewPassword);
+
+            if (!addPasswordResult.Succeeded)
+            {
+                _response.IsSuccess = false;
+
+                _response.Message =
+                    string.Join(
+                        "; ",
+                        addPasswordResult.Errors
+                            .Select(x => x.Description));
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Consume reset token
+            // ---------------------------------------------------------
+
+            resetRequest.ConsumedAtUtc =
+                DateTime.UtcNow;
+
+            resetRequest.ResetIpAddress =
+                request.IpAddress;
+
+            await _db.SaveChangesAsync();
+
+
+            _response.IsSuccess = true;
+            _response.Message =
+                "Password has been reset successfully.";
+
+            _response.Result = null;
+
             return _response;
         }
 
