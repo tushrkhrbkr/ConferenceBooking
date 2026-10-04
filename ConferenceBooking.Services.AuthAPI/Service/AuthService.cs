@@ -476,7 +476,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     };
 
                     _response.Result = Result;
-                    _response.Message  = Result.Message;
+                    _response.Message = Result.Message;
                     return _response;
                 }
 
@@ -511,7 +511,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 var userByEmail = await _userManager.FindByEmailAsync(email);
 
                 // Either username or email identifies an existing account.
-                var existingUser =  userByUsername ?? userByEmail;
+                var existingUser = userByUsername ?? userByEmail;
 
                 // ---------------------------------------------------------
                 // 3. Check pending registration request
@@ -547,7 +547,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     {
                         Result = new RegistrationDuplicateResultDto
                         {
-                            Status =  RegistrationDuplicateStatus.AccountExists,
+                            Status = RegistrationDuplicateStatus.AccountExists,
 
                             UserName = existingUser.UserName ?? username,
 
@@ -587,11 +587,13 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         return _response;
                     }
 
+
                     // -----------------------------------------------------
                     // Identity user exists but profile/request state
                     // is inconsistent.
                     // Do NOT allow another account to be created.
                     // -----------------------------------------------------
+
                     Result = new RegistrationDuplicateResultDto
                     {
                         Status = RegistrationDuplicateStatus.RegistrationBlocked,
@@ -611,51 +613,52 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     _response.Message = Result.Message;
                     return _response;
 
-                    // ---------------------------------------------------------
-                    // 5. No Identity user, but pending request exists.
-                    // This protects against partially inconsistent data.
-                    // ---------------------------------------------------------
-                    if (pendingRequest != null)
-                    {
-                        Result = new RegistrationDuplicateResultDto
-                        {
-                            Status = RegistrationDuplicateStatus.RegistrationPending,
-
-                            UserName = username,
-
-                            CanRegister = false,
-
-                            RequiresPasswordReset = false,
-
-                            RegistrationRequestId = pendingRequest.RegistrationRequestId,
-
-                            Message = "A registration request for this email address is already pending."
-                        };
-                        _response.Result = Result;
-                        _response.Message = Result.Message;
-                        return _response;
-                    }
-
-
-                    // ---------------------------------------------------------
-                    // 6. No duplicate
-                    // ---------------------------------------------------------
+                }
+                // ---------------------------------------------------------
+                // 5. No Identity user, but pending request exists.
+                // This protects against partially inconsistent data.
+                // ---------------------------------------------------------
+                if (pendingRequest != null)
+                {
                     Result = new RegistrationDuplicateResultDto
                     {
-                        Status = RegistrationDuplicateStatus.None,
+                        Status = RegistrationDuplicateStatus.RegistrationPending,
 
                         UserName = username,
 
-                        CanRegister = true,
+                        CanRegister = false,
 
                         RequiresPasswordReset = false,
 
-                        Message = "Registration is available."
+                        RegistrationRequestId = pendingRequest.RegistrationRequestId,
+
+                        Message = "A registration request for this email address is already pending."
                     };
                     _response.Result = Result;
                     _response.Message = Result.Message;
                     return _response;
                 }
+
+
+                // ---------------------------------------------------------
+                // 6. No duplicate
+                // ---------------------------------------------------------
+                Result = new RegistrationDuplicateResultDto
+                {
+                    Status = RegistrationDuplicateStatus.None,
+
+                    UserName = username,
+
+                    CanRegister = true,
+
+                    RequiresPasswordReset = false,
+
+                    Message = "Registration is available."
+                };
+                _response.Result = Result;
+                _response.Message = Result.Message;
+                return _response;
+
 
             }
             catch (Exception ex)
