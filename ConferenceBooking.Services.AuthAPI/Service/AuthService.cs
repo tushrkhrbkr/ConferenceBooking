@@ -1,11 +1,13 @@
-﻿using Azure;
-using AutoMapper;
-using Microsoft.AspNetCore.Identity;
+﻿using AutoMapper;
+using Azure;
+using Azure.Core;
 using ConferenceBooking.Services.AuthAPI.Data;
-using ConferenceBooking.Services.AuthAPI.Models.Dto;
-using Microsoft.AspNetCore.Mvc;
+using ConferenceBooking.Services.AuthAPI.Enums;
 using ConferenceBooking.Services.AuthAPI.Models;
+using ConferenceBooking.Services.AuthAPI.Models.Dto;
 using ConferenceBooking.Services.AuthAPI.Service.IService;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace ConferenceBooking.Services.AuthAPI.Service
@@ -31,8 +33,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             _mapper = mapper;
         }
 
-        public async Task<LoginResponseDto> Login(
-     LoginRequestDto loginRequestDto)
+        public async Task<LoginResponseDto> Login(LoginRequestDto loginRequestDto)
         {
             if (loginRequestDto == null ||
                 string.IsNullOrWhiteSpace(loginRequestDto.UserName) ||
@@ -450,8 +451,189 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             }
         }
 
-        public async Task<ResponseDto> ApproveRegistration(
-       ApproveRegistrationDto approveRequest)
+        public async Task<ResponseDto> CheckRegistrationAsync(RegistrationDuplicateCheckDto newRequest)
+        {
+            try
+            {
+                if (newRequest == null || string.IsNullOrWhiteSpace(newRequest.Email))
+                {
+                    _response.Result = new RegistrationDuplicateResultDto
+                    {
+                        Status = RegistrationDuplicateStatus.RegistrationBlocked,
+                        CanRegister = false,
+                        Message = "Email address is required."
+                    };
+                }
+
+                var email = newRequest.Email.Trim().ToLowerInvariant();
+
+                var atIndex = email.IndexOf('@');
+
+                if (atIndex <= 0 || atIndex == email.Length - 1)
+                {
+                    _response.Result = new RegistrationDuplicateResultDto
+                    {
+                        Status = RegistrationDuplicateStatus.RegistrationBlocked,
+                        CanRegister = false,
+                        Message = "A valid email address is required."
+                    };
+                }
+
+                // Username is ALWAYS derived from email.
+                var username = email[..atIndex];
+
+                // ---------------------------------------------------------
+                // 1. Check existing Identity user by username
+                // ---------------------------------------------------------
+                var userByUsername = await _userManager.FindByNameAsync(username);
+
+                // ---------------------------------------------------------
+                // 2. Check existing Identity user by email
+                // ---------------------------------------------------------
+                var userByEmail = await _userManager.FindByEmailAsync(email);
+
+                // Either username or email identifies an existing account.
+                var existingUser =  userByUsername ?? userByEmail;
+
+                // ---------------------------------------------------------
+                // 3. Check pending registration request
+                // ---------------------------------------------------------
+                var pendingRequest =
+                    await _db.Tbl_RegistrationRequest
+                        .AsNoTracking()
+                        .Where(x =>
+                            x.RequestStatus ==
+                                RegistrationRequestStatus.Pending &&
+                            (
+                                x.RequestedUserName == username ||
+                                x.RequestedEmail == email
+                            ))
+                        .OrderByDescending(x => x.SubmittedAtUtc)
+                        .FirstOrDefaultAsync();
+
+                // ---------------------------------------------------------
+                // 4. Existing Identity account
+                // ---------------------------------------------------------
+                if (existingUser != null)
+                {
+                    var profile =
+                        await _db.Tbl_UserProfile
+                            .AsNoTracking()
+                            .FirstOrDefaultAsync(x =>
+                                x.UserId == existingUser.Id);
+
+                    // -----------------------------------------------------
+                    // Existing account is active
+                    // -----------------------------------------------------
+                    if (profile != null && profile.IsActive)
+                    {
+                        _response.Result = new RegistrationDuplicateResultDto
+                        {
+                            Status =  RegistrationDuplicateStatus.AccountExists,
+
+                            UserName = existingUser.UserName ?? username,
+
+                            CanRegister = false,
+
+                            RequiresPasswordReset = true,
+
+                            Message = "An account with this email address already exists. " +
+                                      "Please use the Forgot Password option."
+                        };
+                    }
+
+                    // -----------------------------------------------------
+                    // Existing account + pending request
+                    // -----------------------------------------------------
+                    if (pendingRequest != null)
+                    {
+                        _response.Result = new RegistrationDuplicateResultDto
+                        {
+                            Status = RegistrationDuplicateStatus.RegistrationPending,
+
+                            UserName = username,
+
+                            CanRegister = false,
+
+                            RequiresPasswordReset = false,
+
+                            RegistrationRequestId = pendingRequest.RegistrationRequestId,
+
+                            Message = "A registration request for this account is already pending."
+                        };
+                    }
+
+                    // -----------------------------------------------------
+                    // Identity user exists but profile/request state
+                    // is inconsistent.
+                    // Do NOT allow another account to be created.
+                    // -----------------------------------------------------
+                    _response.Result = new RegistrationDuplicateResultDto
+                    {
+                        Status = RegistrationDuplicateStatus.RegistrationBlocked,
+
+                        UserName = username,
+
+                        CanRegister = false,
+
+                        RequiresPasswordReset = false,
+
+                        Message =
+                            "An existing account record was found, but its " +
+                            "registration state could not be determined. " +
+                            "Please contact the Administrator."
+                    };
+
+                    // ---------------------------------------------------------
+                    // 5. No Identity user, but pending request exists.
+                    // This protects against partially inconsistent data.
+                    // ---------------------------------------------------------
+                    if (pendingRequest != null)
+                    {
+                        _response.Result = new RegistrationDuplicateResultDto
+                        {
+                            Status = RegistrationDuplicateStatus.RegistrationPending,
+
+                            UserName = username,
+
+                            CanRegister = false,
+
+                            RequiresPasswordReset = false,
+
+                            RegistrationRequestId = pendingRequest.RegistrationRequestId,
+
+                            Message = "A registration request for this email address is already pending."
+                        };
+                    }
+
+
+                    // ---------------------------------------------------------
+                    // 6. No duplicate
+                    // ---------------------------------------------------------
+                    _response.Result = new RegistrationDuplicateResultDto
+                    {
+                        Status = RegistrationDuplicateStatus.None,
+
+                        UserName = username,
+
+                        CanRegister = true,
+
+                        RequiresPasswordReset = false,
+
+                        Message = "Registration is available."
+                    };
+                }
+
+            }
+            catch (Exception ex)
+            {
+                _response.IsSuccess = false;
+                _response.Message = ex.Message;
+            }
+            return _response;
+        }
+
+        public async Task<ResponseDto> ApproveRegistration(ApproveRegistrationDto approveRequest)
         {
             var response = new ResponseDto();
 
@@ -759,8 +941,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             }
         }
 
-        public async Task<ResponseDto> RejectRegistration(
-    RejectRegistrationDto rejectRequest)
+        public async Task<ResponseDto> RejectRegistration(RejectRegistrationDto rejectRequest)
         {
             var response = new ResponseDto();
 
@@ -899,6 +1080,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return response;
             }
         }
+        
         public async Task<bool> AssignRole(string username, string roleName)
         {
             var user = _db.ApplicationUsers.FirstOrDefault(u => u.UserName.ToLower() == username.ToLower());
