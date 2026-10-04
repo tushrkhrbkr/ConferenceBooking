@@ -1403,6 +1403,17 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 .Trim()
                 .ToLowerInvariant();
 
+            var user = await _userManager.FindByEmailAsync(email);
+
+            if (user == null)
+            {
+                _response.IsSuccess = false;
+                _response.Message = "Invalid or expired OTP.";
+
+                return _response;
+            }
+
+
             var otp = request.Otp.Trim();
 
             if (otp.Length != 6 ||
@@ -1416,6 +1427,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             }
 
             await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            await AcquirePasswordResetLockAsync(user.Id);
 
             var resetRequest =
                 await _db.Tbl_PasswordReset
@@ -1434,7 +1446,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
 
-            await AcquirePasswordResetLockAsync(resetRequest.UserId);
+            
 
             if (resetRequest.OtpVerifiedAtUtc != null)
             {
@@ -1556,16 +1568,17 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 _passwordResetTokenService
                     .HashToken(request.ResetToken);
 
-            await using var transaction =    await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            await using var transaction =  await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
 
             var resetRequest =
                 await _db.Tbl_PasswordReset
                     .FirstOrDefaultAsync(x =>
-                        x.ResetTokenHash == tokenHash &&
-                        x.ConsumedAtUtc == null);
+                        x.ResetTokenHash == tokenHash);
 
             if (resetRequest == null)
             {
+                await transaction.RollbackAsync();
+
                 _response.IsSuccess = false;
                 _response.Message =
                     "Invalid or expired reset token.";
@@ -1573,9 +1586,29 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
 
-
             await AcquirePasswordResetLockAsync(
                 resetRequest.UserId);
+
+            // Re-read after acquiring the per-user lock.
+            // This guarantees that a concurrent reset operation
+            // cannot consume the token between the initial lookup
+            // and the protected validation.
+            resetRequest =
+                await _db.Tbl_PasswordReset
+                    .FirstOrDefaultAsync(x =>
+                        x.ResetTokenHash == tokenHash);
+
+            if (resetRequest == null ||
+                resetRequest.ConsumedAtUtc != null)
+            {
+                await transaction.RollbackAsync();
+
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired reset token.";
+
+                return _response;
+            }
 
             if (resetRequest.OtpVerifiedAtUtc == null)
             {
