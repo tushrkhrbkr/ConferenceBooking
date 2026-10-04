@@ -233,13 +233,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
         public async Task<ResponseDto> RequestRegistration(RegistrationRequestDto newRequest)
         {
-            var response = new ResponseDto();
-
             if (newRequest == null)
             {
-                response.IsSuccess = false;
-                response.Message = "Registration request is required.";
-                return response;
+                _response.IsSuccess = false;
+                _response.Message = "Registration request is required.";
+                return _response;
             }
 
             await using var transaction =
@@ -248,8 +246,19 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
             try
             {
-                var username = newRequest.Username.Trim();
                 var email = newRequest.Email.Trim().ToLowerInvariant();
+
+                var atIndex = email.IndexOf('@');
+
+                if (atIndex <= 0 || atIndex == email.Length - 1)
+                {
+                    _response.IsSuccess = false;
+                    _response.Message = "A valid email address is required.";
+                    return _response;
+                }
+
+                // Username is ALWAYS derived from email.
+                var username = email[..atIndex];
 
                 // ---------------------------------------------------------
                 // 1. Validate duplicate Identity username
@@ -259,12 +268,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingUserByUsername != null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "An account with this username already exists.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -275,12 +284,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingUserByEmail != null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "An account with this email address already exists.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -295,12 +304,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingRequest != null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "A registration request for this username is already pending.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -316,12 +325,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                     if (!departmentExists)
                     {
-                        response.IsSuccess = false;
-                        response.Message =
+                        _response.IsSuccess = false;
+                        _response.Message =
                             "The selected department is not active.";
 
                         await transaction.RollbackAsync();
-                        return response;
+                        return _response;
                     }
                 }
 
@@ -345,14 +354,14 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (!createUserResult.Succeeded)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         string.Join(
                             "; ",
                             createUserResult.Errors.Select(x => x.Description));
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -419,11 +428,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 // ---------------------------------------------------------
                 await transaction.CommitAsync();
 
-                response.IsSuccess = true;
-                response.Message =
+                _response.IsSuccess = true;
+                _response.Message =
                     "Registration request submitted successfully.";
 
-                response.Result =
+                _response.Result =
                     new
                     {
                         RegistrationRequestId =
@@ -437,17 +446,17 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                             Enums.RegistrationRequestStatus.Pending
                     };
 
-                return response;
+                return _response;
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
 
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Registration could not be completed." + ex.Message;
 
-                return response;
+                return _response;
             }
         }
 
@@ -468,6 +477,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                     _response.Result = Result;
                     _response.Message  = Result.Message;
+                    return _response;
                 }
 
                 var email = newRequest.Email.Trim().ToLowerInvariant();
@@ -484,6 +494,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     };
                     _response.Result = Result;
                     _response.Message = Result.Message;
+                    return _response;
                 }
 
                 // Username is ALWAYS derived from email.
@@ -549,6 +560,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         };
                         _response.Result = Result;
                         _response.Message = Result.Message;
+                        return _response;
                     }
 
                     // -----------------------------------------------------
@@ -572,6 +584,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         };
                         _response.Result = Result;
                         _response.Message = Result.Message;
+                        return _response;
                     }
 
                     // -----------------------------------------------------
@@ -596,6 +609,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     };
                     _response.Result = Result;
                     _response.Message = Result.Message;
+                    return _response;
 
                     // ---------------------------------------------------------
                     // 5. No Identity user, but pending request exists.
@@ -619,6 +633,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         };
                         _response.Result = Result;
                         _response.Message = Result.Message;
+                        return _response;
                     }
 
 
@@ -639,6 +654,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     };
                     _response.Result = Result;
                     _response.Message = Result.Message;
+                    return _response;
                 }
 
             }
@@ -652,15 +668,13 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
         public async Task<ResponseDto> ApproveRegistration(ApproveRegistrationDto approveRequest)
         {
-            var response = new ResponseDto();
-
             if (approveRequest == null)
             {
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Approval request is required.";
 
-                return response;
+                return _response;
             }
 
             await using var transaction =
@@ -680,12 +694,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingRequest == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "Registration request not found.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -694,12 +708,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 if (existingRequest.RequestStatus !=
                     Enums.RegistrationRequestStatus.Pending)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "This registration request has already been processed.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -714,12 +728,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (department == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "The selected department is not active.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -741,12 +755,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         roleName,
                         StringComparer.OrdinalIgnoreCase))
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "Invalid role selected.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -758,12 +772,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (user == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "The Identity account associated with this request was not found.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -776,12 +790,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (userProfile == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "The user profile associated with this request was not found.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -789,12 +803,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 // ---------------------------------------------------------
                 if (userProfile.IsActive)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "The user profile is already active.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -811,15 +825,15 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                     if (!createRoleResult.Succeeded)
                     {
-                        response.IsSuccess = false;
-                        response.Message =
+                        _response.IsSuccess = false;
+                        _response.Message =
                             string.Join(
                                 "; ",
                                 createRoleResult.Errors
                                     .Select(x => x.Description));
 
                         await transaction.RollbackAsync();
-                        return response;
+                        return _response;
                     }
 
                     role =
@@ -849,15 +863,15 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                     if (!removeRolesResult.Succeeded)
                     {
-                        response.IsSuccess = false;
-                        response.Message =
+                        _response.IsSuccess = false;
+                        _response.Message =
                             string.Join(
                                 "; ",
                                 removeRolesResult.Errors
                                     .Select(x => x.Description));
 
                         await transaction.RollbackAsync();
-                        return response;
+                        return _response;
                     }
                 }
 
@@ -871,15 +885,15 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (!addRoleResult.Succeeded)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         string.Join(
                             "; ",
                             addRoleResult.Errors
                                 .Select(x => x.Description));
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -927,11 +941,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 // ---------------------------------------------------------
                 await transaction.CommitAsync();
 
-                response.IsSuccess = true;
-                response.Message =
+                _response.IsSuccess = true;
+                _response.Message =
                     "Registration approved successfully.";
 
-                response.Result =
+                _response.Result =
                     new
                     {
                         UserId = user.Id,
@@ -944,31 +958,29 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         Role = roleName
                     };
 
-                return response;
+                return _response;
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
 
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Registration approval failed." + ex.Message;
 
-                return response;
+                return _response;
             }
         }
 
         public async Task<ResponseDto> RejectRegistration(RejectRegistrationDto rejectRequest)
         {
-            var response = new ResponseDto();
-
             if (rejectRequest == null)
             {
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Rejection request is required.";
 
-                return response;
+                return _response;
             }
 
             await using var transaction =
@@ -988,12 +1000,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingRequest == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "Registration request not found.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -1002,12 +1014,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 if (existingRequest.RequestStatus !=
                     Enums.RegistrationRequestStatus.Pending)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "This registration request has already been processed.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -1068,11 +1080,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 // ---------------------------------------------------------
                 await transaction.CommitAsync();
 
-                response.IsSuccess = true;
-                response.Message =
+                _response.IsSuccess = true;
+                _response.Message =
                     "Registration rejected successfully.";
 
-                response.Result =
+                _response.Result =
                     new
                     {
                         RegistrationRequestId =
@@ -1082,19 +1094,19 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                             Enums.RegistrationRequestStatus.Rejected
                     };
 
-                return response;
+                return _response;
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
 
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Registration rejection failed." + ex.Message;
 
 
 
-                return response;
+                return _response;
             }
         }
         
