@@ -145,8 +145,8 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
         }
 
         [Authorize]
-        [HttpPost("updateuserdata/{userid}/{displayName}/{email}/{phoneNumber}")]
-        public async Task<IActionResult> UpdateUserData(string userid, string displayName, string email, string phoneNumber)
+        [HttpPost("updateuserdata/{userid}/{displayName}/{phoneNumber}")]
+        public async Task<IActionResult> UpdateUserData(string userid, string displayName, string phoneNumber)
         {
             var response = await _authService.UpdateUserData(userid, displayName, phoneNumber);
             if (response.Result == null && !response.IsSuccess)
