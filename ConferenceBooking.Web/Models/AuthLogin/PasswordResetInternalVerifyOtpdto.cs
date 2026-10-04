@@ -1,6 +1,6 @@
 ﻿namespace ConferenceBooking.Web.Models.AuthLogin
 {
-    public class PasswordResetVerifyOtpDto
+    public class PasswordResetInternalVerifyOtpdto
     {
         public string Email { get; set; } = string.Empty;
 

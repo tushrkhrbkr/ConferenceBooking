@@ -109,7 +109,7 @@ namespace ConferenceBooking.Web.Service
         }
 
         public async Task<ResponseDto?> ForgotPassword(
-    PasswordResetRequestDto request)
+    PasswordResetInternalRequestDto request)
         {
             return await _baseService.SendAsync(new RequestDto()
             {
@@ -125,7 +125,7 @@ namespace ConferenceBooking.Web.Service
 
 
         public async Task<ResponseDto?> VerifyPasswordResetOtp(
-            PasswordResetVerifyOtpDto request)
+            PasswordResetInternalVerifyOtpdto request)
         {
             return await _baseService.SendAsync(new RequestDto()
             {

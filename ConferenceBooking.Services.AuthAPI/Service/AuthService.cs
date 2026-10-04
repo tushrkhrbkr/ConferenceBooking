@@ -1261,6 +1261,9 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
 
+            await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+
+            await AcquirePasswordResetLockAsync(user.Id);
             // ---------------------------------------------------------
             // Validate application profile
             // ---------------------------------------------------------
@@ -1281,24 +1284,53 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             }
 
             // ---------------------------------------------------------
-            // Resend cooldown
+            // OTP request rate limiting
+            // ---------------------------------------------------------
+
+            var nowUtc = DateTime.UtcNow;
+
+            var oneHourAgoUtc =
+                nowUtc.AddHours(-1);
+
+            var otpRequestCount =
+                await _db.Tbl_PasswordReset
+                    .AsNoTracking()
+                    .CountAsync(x =>
+                        x.UserId == user.Id &&
+                        x.CreatedAtUtc >= oneHourAgoUtc);
+
+            if (otpRequestCount >= 5)
+            {
+                await transaction.RollbackAsync();
+
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+
+            }
+
+            // ---------------------------------------------------------
+            // OTP resend cooldown - 60 seconds
             // ---------------------------------------------------------
 
             var cooldownFromUtc =
-                DateTime.UtcNow.AddSeconds(-60);
+                nowUtc.AddSeconds(-60);
 
             var recentRequest =
                 await _db.Tbl_PasswordReset
                     .AsNoTracking()
                     .Where(x =>
                         x.UserId == user.Id &&
-                        x.CreatedAtUtc >= cooldownFromUtc &&
-                        x.ConsumedAtUtc == null)
+                        x.CreatedAtUtc >= cooldownFromUtc)
                     .OrderByDescending(x => x.CreatedAtUtc)
                     .FirstOrDefaultAsync();
 
             if (recentRequest != null)
             {
+                await transaction.RollbackAsync();
+
                 _response.IsSuccess = true;
                 _response.Message = genericMessage;
                 _response.Result = null;
@@ -1338,6 +1370,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 .AddAsync(passwordReset);
 
             await _db.SaveChangesAsync();
+
+            await transaction.CommitAsync();
 
             /*
              * EmailAPI integration will be added in Part 2.
@@ -1381,6 +1415,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
 
+            await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+
             var resetRequest =
                 await _db.Tbl_PasswordReset
                     .OrderByDescending(x => x.CreatedAtUtc)
@@ -1390,6 +1426,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
             if (resetRequest == null)
             {
+                await transaction.RollbackAsync();
                 _response.IsSuccess = false;
                 _response.Message =
                     "Invalid or expired OTP.";
@@ -1397,8 +1434,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
 
+            await AcquirePasswordResetLockAsync(resetRequest.UserId);
+
             if (resetRequest.OtpVerifiedAtUtc != null)
             {
+                await transaction.RollbackAsync();
                 _response.IsSuccess = false;
                 _response.Message =
                     "OTP has already been verified.";
@@ -1408,6 +1448,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
             if (resetRequest.OtpExpiresAtUtc <= DateTime.UtcNow)
             {
+                await transaction.RollbackAsync();
                 _response.IsSuccess = false;
                 _response.Message =
                     "OTP has expired.";
@@ -1418,6 +1459,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             if (resetRequest.OtpAttemptCount >=
                 resetRequest.OtpMaxAttempts)
             {
+                await transaction.RollbackAsync();
                 _response.IsSuccess = false;
                 _response.Message =
                     "Maximum OTP attempts exceeded.";
@@ -1440,6 +1482,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     StringComparison.OrdinalIgnoreCase))
             {
                 await _db.SaveChangesAsync();
+
+                await transaction.CommitAsync();
 
                 _response.IsSuccess = false;
                 _response.Message =
@@ -1469,6 +1513,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 DateTime.UtcNow.AddMinutes(10);
 
             await _db.SaveChangesAsync();
+
+            await transaction.CommitAsync();
 
             _response.IsSuccess = true;
             _response.Message =
@@ -1510,6 +1556,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 _passwordResetTokenService
                     .HashToken(request.ResetToken);
 
+            await using var transaction =    await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+
             var resetRequest =
                 await _db.Tbl_PasswordReset
                     .FirstOrDefaultAsync(x =>
@@ -1525,8 +1573,13 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
 
+
+            await AcquirePasswordResetLockAsync(
+                resetRequest.UserId);
+
             if (resetRequest.OtpVerifiedAtUtc == null)
             {
+                await transaction.RollbackAsync();
                 _response.IsSuccess = false;
                 _response.Message =
                     "OTP verification is required.";
@@ -1537,6 +1590,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             if (resetRequest.ResetTokenExpiresAtUtc == null ||
                 resetRequest.ResetTokenExpiresAtUtc <= DateTime.UtcNow)
             {
+                await transaction.RollbackAsync();
                 _response.IsSuccess = false;
                 _response.Message =
                     "Invalid or expired reset token.";
@@ -1550,6 +1604,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
             if (user == null)
             {
+                await transaction.RollbackAsync();
                 _response.IsSuccess = false;
                 _response.Message =
                     "Password reset could not be completed.";
@@ -1577,6 +1632,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
             if (!resetPasswordResult.Succeeded)
             {
+                await transaction.RollbackAsync();
                 _response.IsSuccess = false;
 
                 _response.Message =
@@ -1600,6 +1656,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
             await _db.SaveChangesAsync();
 
+            await transaction.CommitAsync();
 
             _response.IsSuccess = true;
             _response.Message =
@@ -1647,6 +1704,20 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 _response.Message = "No user found!!!";
             }
             return _response;
+        }
+
+        private async Task AcquirePasswordResetLockAsync(string userId)
+        {
+            var resource =
+                $"PasswordReset:{userId}";
+
+            await _db.Database.ExecuteSqlRawAsync(
+                "EXEC sp_getapplock " +
+                "@Resource={0}, " +
+                "@LockMode='Exclusive', " +
+                "@LockOwner='Transaction', " +
+                "@LockTimeout=5000",
+                resource);
         }
 
         public ResponseDto SaveUserSession(UserLoginSessionsDto userLoginSessionsDto)

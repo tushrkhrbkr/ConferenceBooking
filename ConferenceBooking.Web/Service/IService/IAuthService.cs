@@ -18,9 +18,9 @@ namespace ConferenceBooking.Web.Service.IService
         Task<ResponseDto?> GetUserSession(Guid sessionId);
         Task<ResponseDto?> UpdateUserSession(UserLoginSessionsDto userLoginSessionsDto);
 
-        Task<ResponseDto?> ForgotPassword(PasswordResetRequestDto request);
+        Task<ResponseDto?> ForgotPassword(PasswordResetInternalRequestDto request);
 
-        Task<ResponseDto?> VerifyPasswordResetOtp(PasswordResetVerifyOtpDto request);
+        Task<ResponseDto?> VerifyPasswordResetOtp(PasswordResetInternalVerifyOtpdto request);
 
         Task<ResponseDto?> ResetPassword(PasswordResetCompleteDto request);
 

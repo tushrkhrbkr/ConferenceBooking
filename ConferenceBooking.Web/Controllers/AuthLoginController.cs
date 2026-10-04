@@ -170,7 +170,7 @@ namespace MUS.Webapp.Controllers
         {
             var clientIpAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
 
-            var request = new PasswordResetRequestDto
+            var request = new PasswordResetInternalRequestDto
             {
                 Email = email,
                 IpAddress = clientIpAddress

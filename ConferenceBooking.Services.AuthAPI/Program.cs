@@ -31,23 +31,10 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 ).AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
 
-builder.Services
-    .AddIdentity<ApplicationUser, IdentityRole>(options =>
-    {
-        options.User.RequireUniqueEmail = true;
-
-        options.Password.RequiredLength = 8;
-        options.Password.RequireDigit = true;
-        options.Password.RequireUppercase = true;
-        options.Password.RequireLowercase = true;
-        options.Password.RequireNonAlphanumeric = false;
-
-        options.Lockout.MaxFailedAccessAttempts = 5;
-        options.Lockout.DefaultLockoutTimeSpan =
-            TimeSpan.FromMinutes(15);
-    });
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
+builder.Services.AddScoped<IOtpService, OtpService>();
+builder.Services.AddScoped<IPasswordResetTokenService, PasswordResetTokenService>();
 builder.Services.AddHostedService<SessionTimeoutService>();
 builder.Services.AddControllers();
 IMapper mapper = MappingConfig.RegisterMaps().CreateMapper();
