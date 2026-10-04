@@ -159,6 +159,26 @@ namespace MUS.Webapp.Controllers
             return View();
         }
 
+        [HttpGet]
+        public async Task<IActionResult> ForgotPassword()
+        {
+            return View();
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> ForgotPassword(string email)
+        {
+            var clientIpAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+            var request = new PasswordResetRequestDto
+            {
+                Email = email,
+                IpAddress = clientIpAddress
+            };
+
+            ResponseDto resetRequestDto = await _authService.ForgotPassword(request);
+            return View();
+        }
         
     }
 }

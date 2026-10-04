@@ -25,6 +25,17 @@ namespace ConferenceBooking.Web.Service
                 client.Timeout = TimeSpan.FromMinutes(10);
                 HttpRequestMessage message = new();
                 message.Headers.Add("Accept", "application/json");
+
+
+                if (requestDto.Headers != null)
+                {
+                    foreach (var header in requestDto.Headers)
+                    {
+                        message.Headers.TryAddWithoutValidation(
+                            header.Key,
+                            header.Value);
+                    }
+                }
                 //token
 
                 if (withBearer)

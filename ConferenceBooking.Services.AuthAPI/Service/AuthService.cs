@@ -1558,34 +1558,31 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             }
 
             // ---------------------------------------------------------
-            // Reset Identity password
+            // Generate ASP.NET Identity password-reset token
             // ---------------------------------------------------------
 
-            var removePasswordResult =
-                await _userManager.RemovePasswordAsync(user);
+            var identityResetToken =
+                await _userManager.GeneratePasswordResetTokenAsync(user);
 
-            if (!removePasswordResult.Succeeded)
-            {
-                _response.IsSuccess = false;
-                _response.Message =
-                    "Password reset could not be completed.";
 
-                return _response;
-            }
+            // ---------------------------------------------------------
+            // Reset Identity password atomically through Identity
+            // ---------------------------------------------------------
 
-            var addPasswordResult =
-                await _userManager.AddPasswordAsync(
+            var resetPasswordResult =
+                await _userManager.ResetPasswordAsync(
                     user,
+                    identityResetToken,
                     request.NewPassword);
 
-            if (!addPasswordResult.Succeeded)
+            if (!resetPasswordResult.Succeeded)
             {
                 _response.IsSuccess = false;
 
                 _response.Message =
                     string.Join(
                         "; ",
-                        addPasswordResult.Errors
+                        resetPasswordResult.Errors
                             .Select(x => x.Description));
 
                 return _response;

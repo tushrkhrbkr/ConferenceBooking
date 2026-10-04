@@ -11,8 +11,9 @@ namespace ConferenceBooking.Web.Service
         public AuthService(IBaseService baseService)
         {
             _baseService = baseService;
-        }     
+        }
 
+        
         public async Task<ResponseDto?> Login(LoginRequestDto loginRequestDto)
         {
             return await _baseService.SendAsync(new RequestDto()
@@ -22,15 +23,7 @@ namespace ConferenceBooking.Web.Service
                 Data = loginRequestDto
             }, withBearer: false);
         }
-        public async Task<ResponseDto?> LoginBySSO(string username)
-        {
-            return await _baseService.SendAsync(new RequestDto()
-            {
-                ApiType = SD.ApiType.POST,
-                Url = SD.AuthAPIBase + "/api/auth/loginbysso/" + username
-            }, withBearer: false);
-        }
-
+        
         public async Task<ResponseDto?> PasswordChange(PasswordChangeDto model)
         {
             throw new NotImplementedException();
@@ -115,5 +108,65 @@ namespace ConferenceBooking.Web.Service
             }, withBearer: false);
         }
 
+        public async Task<ResponseDto?> ForgotPassword(
+    PasswordResetRequestDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.POST,
+
+                Url = SD.AuthAPIBase +
+                      "/api/auth/password/forgot",
+
+                Data = request
+            },
+            withBearer: false);
+        }
+
+
+        public async Task<ResponseDto?> VerifyPasswordResetOtp(
+            PasswordResetVerifyOtpDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.POST,
+
+                Url = SD.AuthAPIBase +
+                      "/api/auth/password/verify-otp",
+
+                Data = request
+            },
+            withBearer: false);
+        }
+
+
+        public async Task<ResponseDto?> ResetPassword(
+            PasswordResetCompleteDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.POST,
+
+                Url = SD.AuthAPIBase +
+                      "/api/auth/password/reset",
+
+                Data = request
+            },
+            withBearer: false);
+        }
+
+
+        private static Dictionary<string, string> BuildClientIpHeader(
+            string? clientIpAddress)
+        {
+            var headers = new Dictionary<string, string>();
+
+            if (!string.IsNullOrWhiteSpace(clientIpAddress))
+            {
+                headers["X-Client-IP"] = clientIpAddress;
+            }
+
+            return headers;
+        }
     }
 }

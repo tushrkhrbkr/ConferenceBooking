@@ -7,7 +7,7 @@ namespace ConferenceBooking.Web.Service.IService
     {
         //Task<ResponseDto?> Register(ADRegistrationRequestDto registrationRequestDto);
         Task<ResponseDto?> Login(LoginRequestDto loginRequestDto);
-        Task<ResponseDto?> LoginBySSO(string username);
+
         //Task<ResponseDto?> UserProfileRegister(UserProfileRegistrationDto userProfileRegistrationDto);       
         //Task<ResponseDto?> GetUserRole(string Uid);
         //Task<ResponseDto?> AssignRoleAsync(ADRegistrationRequestDto registrationRequestDto);
@@ -17,6 +17,12 @@ namespace ConferenceBooking.Web.Service.IService
         Task<ResponseDto?> SaveUserSession(UserLoginSessionsDto userLoginSessionsDto);
         Task<ResponseDto?> GetUserSession(Guid sessionId);
         Task<ResponseDto?> UpdateUserSession(UserLoginSessionsDto userLoginSessionsDto);
+
+        Task<ResponseDto?> ForgotPassword(PasswordResetRequestDto request);
+
+        Task<ResponseDto?> VerifyPasswordResetOtp(PasswordResetVerifyOtpDto request);
+
+        Task<ResponseDto?> ResetPassword(PasswordResetCompleteDto request);
 
     }
 }
