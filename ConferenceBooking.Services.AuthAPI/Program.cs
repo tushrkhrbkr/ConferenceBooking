@@ -36,6 +36,16 @@ builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 builder.Services.AddScoped<IOtpService, OtpService>();
 builder.Services.AddScoped<IPasswordResetTokenService, PasswordResetTokenService>();
 builder.Services.AddScoped<IEmailNotificationService, EmailNotificationService>();
+builder.Services.Configure<EmailNotificationDispatcherOptions>(
+    builder.Configuration.GetSection("EmailNotificationDispatcher"));
+
+builder.Services.AddHttpClient<IEmailNotificationDispatcher,EmailNotificationDispatcher>();
+
+builder.Services.Configure<EmailNotificationWorkerOptions>(
+    builder.Configuration.GetSection("EmailNotificationWorker"));
+
+builder.Services.AddHostedService<EmailNotificationWorker>();
+
 builder.Services.AddHostedService<SessionTimeoutService>();
 builder.Services.AddControllers();
 IMapper mapper = MappingConfig.RegisterMaps().CreateMapper();
