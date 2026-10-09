@@ -23,8 +23,10 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         private readonly IMapper _mapper;
         private readonly IOtpService _otpService;
         private readonly IPasswordResetTokenService _passwordResetTokenService;
+        private readonly IEmailNotificationService _emailNotificationService;
+        private readonly ILogger<AuthService> _logger;
 
-        public AuthService(ApplicationDbContext db,UserManager<ApplicationUser> userManager,SignInManager<ApplicationUser> signInManager,RoleManager<IdentityRole>roleManager, IJwtTokenGenerator jwtTokenGenerator, IMapper mapper, IOtpService otpService, IPasswordResetTokenService passwordResetTokenService)
+        public AuthService(ApplicationDbContext db,UserManager<ApplicationUser> userManager,SignInManager<ApplicationUser> signInManager,RoleManager<IdentityRole>roleManager, IJwtTokenGenerator jwtTokenGenerator, IMapper mapper, IOtpService otpService, IPasswordResetTokenService passwordResetTokenService, IEmailNotificationService emailNotificationService, ILogger<AuthService> logger)
         {
             _db = db;
             _response = new ResponseDto();
@@ -35,6 +37,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             _mapper = mapper;
             _otpService = otpService;
             _passwordResetTokenService = passwordResetTokenService;
+            _emailNotificationService = emailNotificationService;
+            _logger = logger;
         }
 
         public async Task<LoginResponseDto> Login(LoginRequestDto loginRequestDto)
@@ -1206,15 +1210,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
         public async Task<ResponseDto> ForgotPasswordAsync(PasswordResetRequestDto request)
         {
-            /*
-             * IMPORTANT:
-             * Never reveal whether the supplied email exists.
-             */
-
             const string genericMessage =
                 "If an account exists for this email address, " +
                 "an OTP has been sent.";
 
+            // Always return a generic response to prevent account enumeration.
             if (request == null ||
                 string.IsNullOrWhiteSpace(request.Email))
             {
@@ -1225,18 +1225,10 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
 
-            var email = request.Email
-                .Trim()
-                .ToLowerInvariant();
-
-            // ---------------------------------------------------------
-            // Validate basic email structure
-            // ---------------------------------------------------------
-
+            var email = request.Email.Trim().ToLowerInvariant();
             var atIndex = email.IndexOf('@');
 
-            if (atIndex <= 0 ||
-                atIndex == email.Length - 1)
+            if (atIndex <= 0 || atIndex == email.Length - 1)
             {
                 _response.IsSuccess = true;
                 _response.Message = genericMessage;
@@ -1245,12 +1237,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
 
-            // ---------------------------------------------------------
-            // Find Identity user
-            // ---------------------------------------------------------
-
-            var user = await _userManager
-                .FindByEmailAsync(email);
+            // Find the Identity user.
+            var user = await _userManager.FindByEmailAsync(email);
 
             if (user == null)
             {
@@ -1261,65 +1249,59 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
 
-            await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            // Serialize concurrent OTP requests for the same user.
+            await using var transaction =
+                await _db.Database.BeginTransactionAsync(
+                    System.Data.IsolationLevel.Serializable);
 
-            await AcquirePasswordResetLockAsync(user.Id);
-            // ---------------------------------------------------------
-            // Validate application profile
-            // ---------------------------------------------------------
-
-            var profile = await _db.Tbl_UserProfile
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x =>
-                    x.UserId == user.Id &&
-                    x.EmailAddress == email);
-
-            if (profile == null || !profile.IsActive)
+            try
             {
-                _response.IsSuccess = true;
-                _response.Message = genericMessage;
-                _response.Result = null;
+                await AcquirePasswordResetLockAsync(user.Id);
 
-                return _response;
-            }
+                // Confirm that the application profile exists and is active.
+                var profile = await _db.Tbl_UserProfile
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x =>
+                        x.UserId == user.Id &&
+                        x.EmailAddress == email);
 
-            // ---------------------------------------------------------
-            // OTP request rate limiting
-            // ---------------------------------------------------------
+                if (profile == null || !profile.IsActive)
+                {
+                    await transaction.RollbackAsync();
 
-            var nowUtc = DateTime.UtcNow;
+                    _response.IsSuccess = true;
+                    _response.Message = genericMessage;
+                    _response.Result = null;
 
-            var oneHourAgoUtc =
-                nowUtc.AddHours(-1);
+                    return _response;
+                }
 
-            var otpRequestCount =
-                await _db.Tbl_PasswordReset
+                var nowUtc = DateTime.UtcNow;
+
+                // Rate limit: maximum five requests in the previous hour.
+                var oneHourAgoUtc = nowUtc.AddHours(-1);
+
+                var otpRequestCount = await _db.Tbl_PasswordReset
                     .AsNoTracking()
                     .CountAsync(x =>
                         x.UserId == user.Id &&
                         x.CreatedAtUtc >= oneHourAgoUtc);
 
-            if (otpRequestCount >= 5)
-            {
-                await transaction.RollbackAsync();
+                if (otpRequestCount >= 5)
+                {
+                    await transaction.RollbackAsync();
 
-                _response.IsSuccess = true;
-                _response.Message = genericMessage;
-                _response.Result = null;
+                    _response.IsSuccess = true;
+                    _response.Message = genericMessage;
+                    _response.Result = null;
 
-                return _response;
+                    return _response;
+                }
 
-            }
+                // Resend cooldown: at least 60 seconds between requests.
+                var cooldownFromUtc = nowUtc.AddSeconds(-60);
 
-            // ---------------------------------------------------------
-            // OTP resend cooldown - 60 seconds
-            // ---------------------------------------------------------
-
-            var cooldownFromUtc =
-                nowUtc.AddSeconds(-60);
-
-            var recentRequest =
-                await _db.Tbl_PasswordReset
+                var recentRequest = await _db.Tbl_PasswordReset
                     .AsNoTracking()
                     .Where(x =>
                         x.UserId == user.Id &&
@@ -1327,9 +1309,56 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     .OrderByDescending(x => x.CreatedAtUtc)
                     .FirstOrDefaultAsync();
 
-            if (recentRequest != null)
-            {
-                await transaction.RollbackAsync();
+                if (recentRequest != null)
+                {
+                    await transaction.RollbackAsync();
+
+                    _response.IsSuccess = true;
+                    _response.Message = genericMessage;
+                    _response.Result = null;
+
+                    return _response;
+                }
+
+                // Generate the OTP and store only its hash in PasswordReset.
+                var otp = _otpService.GenerateOtp();
+                var otpHash = _otpService.HashOtp(otp);
+
+                const int otpValidityMinutes = 5;
+
+                var passwordReset = new PasswordReset
+                {
+                    UserId = user.Id,
+                    EmailAddress = email,
+                    OtpHash = otpHash,
+                    OtpExpiresAtUtc =
+                        nowUtc.AddMinutes(otpValidityMinutes),
+                    OtpAttemptCount = 0,
+                    OtpMaxAttempts = 5,
+                    CreatedAtUtc = nowUtc,
+                    RequestedIpAddress = request.IpAddress
+                };
+
+                await _db.Tbl_PasswordReset.AddAsync(passwordReset);
+
+                // Queue the email in the SAME DbContext and transaction.
+                // The OTP is included only in the protected outbox payload.
+                var emailPayload = new PasswordResetOtpEmailPayloadDto
+                {
+                    Otp = otp,
+                    ValidityMinutes = otpValidityMinutes
+                };
+
+                await _emailNotificationService.EnqueueAsync(
+                    eventType: EmailEventTypes.PasswordResetOtp,
+                    toEmail: email,
+                    payload: emailPayload,
+                    subject: "CONVENE - Password Reset OTP");
+
+                // EnqueueAsync calls SaveChangesAsync using this DbContext.
+                // Both PasswordReset and EmailNotificationOutbox are still
+                // inside this transaction until CommitAsync succeeds.
+                await transaction.CommitAsync();
 
                 _response.IsSuccess = true;
                 _response.Message = genericMessage;
@@ -1337,53 +1366,28 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 return _response;
             }
-
-            // ---------------------------------------------------------
-            // Generate OTP
-            // ---------------------------------------------------------
-
-            var otp = _otpService.GenerateOtp();
-
-            var otpHash = _otpService.HashOtp(otp);
-
-            var passwordReset = new PasswordReset
+            catch
             {
-                UserId = user.Id,
+                // If the reset record or outbox insert fails, do not commit
+                // either operation.
+                try
+                {
+                    await transaction.RollbackAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "Failed to roll back the password-reset transaction.");
+                }
 
-                EmailAddress = email,
+                // Do not return exception details, OTP, or payload to WebApp.
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
 
-                OtpHash = otpHash,
-
-                OtpExpiresAtUtc =
-                    DateTime.UtcNow.AddMinutes(5),
-
-                OtpAttemptCount = 0,
-
-                OtpMaxAttempts = 5,
-
-                CreatedAtUtc = DateTime.UtcNow,
-
-                RequestedIpAddress = request.IpAddress,
-            };
-
-            await _db.Tbl_PasswordReset
-                .AddAsync(passwordReset);
-
-            await _db.SaveChangesAsync();
-
-            await transaction.CommitAsync();
-
-            /*
-             * EmailAPI integration will be added in Part 2.
-             *
-             * DO NOT return the OTP to WebApp.
-             */
-
-            _response.IsSuccess = true;
-            _response.Message = genericMessage;
-            _response.Result = null;
-
-            return _response;
+                return _response;
+            }
         }
 
         public async Task<ResponseDto> VerifyPasswordResetOtpAsync(PasswordResetVerifyOtpDto request)
