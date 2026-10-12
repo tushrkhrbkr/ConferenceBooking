@@ -88,71 +88,42 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         // Recover records abandoned by a crashed worker
         // =============================================================
 
+
         private async Task RecoverStaleNotificationsAsync(
             CancellationToken cancellationToken)
         {
-            using var scope =
-                _scopeFactory.CreateScope();
+            using var scope = _scopeFactory.CreateScope();
 
-            var db =
-                scope.ServiceProvider
-                    .GetRequiredService<ApplicationDbContext>();
+            var db = scope.ServiceProvider
+                .GetRequiredService<ApplicationDbContext>();
 
-            var staleBeforeUtc =
-                DateTime.UtcNow.AddMinutes(
-                    -Math.Max(
-                        1,
-                        _options.ProcessingLeaseMinutes));
+            var staleBeforeUtc = DateTime.UtcNow.AddMinutes(
+                -Math.Max(1, _options.ProcessingLeaseMinutes));
 
+            var recoveredCount =
+                await db.Database.ExecuteSqlInterpolatedAsync($@"
+            UPDATE dbo.Tbl_EmailNotificationOutbox
+            SET
+                Status = {(byte)EmailNotificationStatus.Failed},
+                NextAttemptAtUtc = SYSUTCDATETIME(),
+                LockedBy = NULL,
+                LockedAtUtc = NULL,
+                UpdatedAtUtc = SYSUTCDATETIME(),
+                LastError = 'Processing lease expired; returned to retry queue.'
+            WHERE
+                Status = {(byte)EmailNotificationStatus.Processing}
+                AND LockedAtUtc IS NOT NULL
+                AND LockedAtUtc < {staleBeforeUtc};",
+                    cancellationToken);
 
-            var staleNotifications =
-                await db.Tbl_EmailNotificationOutbox
-                    .Where(x =>
-                        x.Status ==
-                            EmailNotificationStatus.Processing &&
-
-                        x.LockedAtUtc != null &&
-
-                        x.LockedAtUtc <
-                            staleBeforeUtc)
-                    .ToListAsync(cancellationToken);
-
-
-            if (staleNotifications.Count == 0)
+            if (recoveredCount > 0)
             {
-                return;
+                _logger.LogWarning(
+                    "Recovered {Count} stale email notification(s).",
+                    recoveredCount);
             }
-
-
-            foreach (var notification
-                in staleNotifications)
-            {
-                notification.Status =
-                    EmailNotificationStatus.Failed;
-
-                notification.NextAttemptAtUtc =
-                    DateTime.UtcNow;
-
-                notification.LockedBy = null;
-
-                notification.LockedAtUtc = null;
-
-                notification.UpdatedAtUtc =
-                    DateTime.UtcNow;
-
-                notification.LastError =
-                    "Processing lease expired. Notification returned to retry queue.";
-            }
-
-
-            await db.SaveChangesAsync(
-                cancellationToken);
-
-
-            _logger.LogWarning(
-                "Recovered {Count} stale email notification(s).",
-                staleNotifications.Count);
         }
+
 
 
         // =============================================================
@@ -364,6 +335,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             {
                 await MarkAsFailedAsync(
                     notificationId,
+                    notification.AttemptCount,
+                    notification.MaxAttempts,
                     ex,
                     cancellationToken);
             }
@@ -374,172 +347,123 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         // Mark SENT
         // =============================================================
 
+
         private async Task MarkAsSentAsync(
             long notificationId,
             CancellationToken cancellationToken)
         {
-            using var scope =
-                _scopeFactory.CreateScope();
+            using var scope = _scopeFactory.CreateScope();
 
-            var db =
-                scope.ServiceProvider
-                    .GetRequiredService<ApplicationDbContext>();
+            var db = scope.ServiceProvider
+                .GetRequiredService<ApplicationDbContext>();
 
+            var nowUtc = DateTime.UtcNow;
 
-            var notification =
-                await db.Tbl_EmailNotificationOutbox
-                    .FirstOrDefaultAsync(
-                        x =>
-                            x.EmailNotificationOutboxId ==
-                                notificationId &&
+            var affectedRows =
+                await db.Database.ExecuteSqlInterpolatedAsync($@"
+            UPDATE dbo.Tbl_EmailNotificationOutbox
+            SET
+                Status = {(byte)EmailNotificationStatus.Sent},
+                SentAtUtc = {nowUtc},
+                LockedBy = NULL,
+                LockedAtUtc = NULL,
+                UpdatedAtUtc = {nowUtc},
+                LastError = NULL
+            WHERE
+                EmailNotificationOutboxId = {notificationId}
+                AND Status = {(byte)EmailNotificationStatus.Processing}
+                AND LockedBy = {_workerId};",
+                    cancellationToken);
 
-                            x.Status ==
-                                EmailNotificationStatus.Processing &&
-
-                            x.LockedBy ==
-                                _workerId,
-                        cancellationToken);
-
-
-            if (notification == null)
+            if (affectedRows == 0)
             {
+                _logger.LogWarning(
+                    "Could not mark outbox record {OutboxId} as sent because this worker no longer owns it.",
+                    notificationId);
+
                 return;
             }
 
-
-            notification.Status =
-                EmailNotificationStatus.Sent;
-
-            notification.SentAtUtc =
-                DateTime.UtcNow;
-
-            notification.LockedBy = null;
-
-            notification.LockedAtUtc = null;
-
-            notification.UpdatedAtUtc =
-                DateTime.UtcNow;
-
-            notification.LastError = null;
-
-
-            await db.SaveChangesAsync(
-                cancellationToken);
-
-
             _logger.LogInformation(
-                "Email notification sent. " +
-                "OutboxId={OutboxId}, EventType={EventType}, Recipient={Recipient}",
-                notification.EmailNotificationOutboxId,
-                notification.EventType,
-                MaskEmail(notification.ToEmail));
+                "Email notification marked as sent. OutboxId={OutboxId}",
+                notificationId);
         }
+
 
 
         // =============================================================
         // Mark FAILED / DEAD LETTER
         // =============================================================
 
+
         private async Task MarkAsFailedAsync(
             long notificationId,
+            int attemptCount,
+            int maxAttempts,
             Exception exception,
             CancellationToken cancellationToken)
         {
-            using var scope =
-                _scopeFactory.CreateScope();
+            using var scope = _scopeFactory.CreateScope();
 
-            var db =
-                scope.ServiceProvider
-                    .GetRequiredService<ApplicationDbContext>();
+            var db = scope.ServiceProvider
+                .GetRequiredService<ApplicationDbContext>();
 
+            var nowUtc = DateTime.UtcNow;
 
-            var notification =
-                await db.Tbl_EmailNotificationOutbox
-                    .FirstOrDefaultAsync(
-                        x =>
-                            x.EmailNotificationOutboxId ==
-                                notificationId &&
+            var isDeadLetter = attemptCount >= maxAttempts;
 
-                            x.Status ==
-                                EmailNotificationStatus.Processing &&
+            var newStatus = isDeadLetter
+                ? EmailNotificationStatus.DeadLetter
+                : EmailNotificationStatus.Failed;
 
-                            x.LockedBy ==
-                                _workerId,
-                        cancellationToken);
+            DateTime? nextAttemptAtUtc = isDeadLetter
+                ? null
+                : nowUtc.Add(GetRetryDelay(attemptCount));
 
+            var safeError = GetSafeErrorMessage(exception);
 
-            if (notification == null)
-            {
-                return;
-            }
-
-
-            var nowUtc =
-                DateTime.UtcNow;
-
-
-            var safeError =
-                GetSafeErrorMessage(exception);
-
-
-            notification.LockedBy = null;
-
-            notification.LockedAtUtc = null;
-
-            notification.UpdatedAtUtc =
-                nowUtc;
-
-            notification.LastError =
-                safeError;
-
-
-            if (notification.AttemptCount >=
-                notification.MaxAttempts)
-            {
-                notification.Status =
-                    EmailNotificationStatus.DeadLetter;
-
-                notification.NextAttemptAtUtc =
-                    null;
-
-
-                await db.SaveChangesAsync(
+            var affectedRows =
+                await db.Database.ExecuteSqlInterpolatedAsync($@"
+            UPDATE dbo.Tbl_EmailNotificationOutbox
+            SET
+                Status = {(byte)newStatus},
+                NextAttemptAtUtc = {nextAttemptAtUtc},
+                LockedBy = NULL,
+                LockedAtUtc = NULL,
+                UpdatedAtUtc = {nowUtc},
+                LastError = {safeError}
+            WHERE
+                EmailNotificationOutboxId = {notificationId}
+                AND Status = {(byte)EmailNotificationStatus.Processing}
+                AND LockedBy = {_workerId};",
                     cancellationToken);
 
-
-                _logger.LogError(
-                    "Email notification moved to DeadLetter. " +
-                    "OutboxId={OutboxId}, EventType={EventType}, Attempt={Attempt}",
-                    notification.EmailNotificationOutboxId,
-                    notification.EventType,
-                    notification.AttemptCount);
+            if (affectedRows == 0)
+            {
+                _logger.LogWarning(
+                    "Could not update failed outbox record {OutboxId} because this worker no longer owns it.",
+                    notificationId);
 
                 return;
             }
 
-
-            notification.Status =
-                EmailNotificationStatus.Failed;
-
-
-            notification.NextAttemptAtUtc =
-                nowUtc.Add(
-                    GetRetryDelay(
-                        notification.AttemptCount));
-
-
-            await db.SaveChangesAsync(
-                cancellationToken);
-
-
-            _logger.LogWarning(
-                "Email notification failed. " +
-                "OutboxId={OutboxId}, EventType={EventType}, Attempt={Attempt}, NextAttempt={NextAttempt}",
-                notification.EmailNotificationOutboxId,
-                notification.EventType,
-                notification.AttemptCount,
-                notification.NextAttemptAtUtc);
+            if (isDeadLetter)
+            {
+                _logger.LogError(
+                    "Email notification moved to DeadLetter. OutboxId={OutboxId}, Attempt={Attempt}",
+                    notificationId,
+                    attemptCount);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Email notification failed. OutboxId={OutboxId}, Attempt={Attempt}, NextAttempt={NextAttempt}",
+                    notificationId,
+                    attemptCount,
+                    nextAttemptAtUtc);
+            }
         }
+
 
 
         // =============================================================
@@ -569,25 +493,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         // =============================================================
 
         private static string GetSafeErrorMessage(
-            Exception exception)
+    Exception exception)
         {
-            var message =
-                exception.Message?.Trim();
-
-            if (string.IsNullOrWhiteSpace(message))
-            {
-                return "Email notification processing failed.";
-            }
-
-
-            if (message.Length > 4000)
-            {
-                message =
-                    message[..4000];
-            }
-
-
-            return message;
+            // Do not persist raw exception messages. They may contain
+            // internal URLs, SMTP details or other sensitive information.
+            return $"Email notification processing failed ({exception.GetType().Name}).";
         }
 
 

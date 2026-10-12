@@ -39,7 +39,12 @@ builder.Services.AddScoped<IEmailNotificationService, EmailNotificationService>(
 builder.Services.Configure<EmailNotificationDispatcherOptions>(
     builder.Configuration.GetSection("EmailNotificationDispatcher"));
 
-builder.Services.AddHttpClient<IEmailNotificationDispatcher,EmailNotificationDispatcher>();
+builder.Services.AddHttpClient<
+    IEmailNotificationDispatcher,
+    EmailNotificationDispatcher>(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(60);
+    });
 
 builder.Services.Configure<EmailNotificationWorkerOptions>(
     builder.Configuration.GetSection("EmailNotificationWorker"));
