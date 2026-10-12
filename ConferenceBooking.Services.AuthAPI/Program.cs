@@ -64,6 +64,156 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+
+if (app.Environment.IsDevelopment() &&
+    app.Configuration.GetValue<bool>("BootstrapAdmin:Enabled"))
+{
+    using var scope = app.Services.CreateScope();
+
+    var services = scope.ServiceProvider;
+    var userManager =
+        services.GetRequiredService<UserManager<ApplicationUser>>();
+    var roleManager =
+        services.GetRequiredService<RoleManager<IdentityRole>>();
+    var db =
+        services.GetRequiredService<ApplicationDbContext>();
+    var configuration = services.GetRequiredService<IConfiguration>();
+
+    var username = configuration["BootstrapAdmin:UserName"];
+    var email = configuration["BootstrapAdmin:Email"];
+    var password = configuration["BootstrapAdmin:Password"];
+    var displayName =
+        configuration["BootstrapAdmin:DisplayName"]
+        ?? "CONVENE Administrator";
+    var designation =
+        configuration["BootstrapAdmin:Designation"]
+        ?? "System Administrator";
+    var departmentId =
+        configuration.GetValue<int>("BootstrapAdmin:DepartmentId");
+
+    if (string.IsNullOrWhiteSpace(username) ||
+        string.IsNullOrWhiteSpace(email) ||
+        string.IsNullOrWhiteSpace(password))
+    {
+        throw new InvalidOperationException(
+            "Bootstrap Admin configuration is incomplete.");
+    }
+
+    const string adminRole = "Admin";
+
+    // 1. Ensure the Admin role exists.
+    if (!await roleManager.RoleExistsAsync(adminRole))
+    {
+        var roleResult = await roleManager.CreateAsync(
+            new IdentityRole(adminRole));
+
+        if (!roleResult.Succeeded)
+        {
+            throw new InvalidOperationException(
+                "Could not create Admin role: " +
+                string.Join("; ",
+                    roleResult.Errors.Select(e => e.Code)));
+        }
+    }
+
+    // 2. Find or create the Identity user.
+    var user = await userManager.FindByNameAsync(username);
+
+    if (user == null)
+    {
+        var emailOwner = await userManager.FindByEmailAsync(email);
+
+        if (emailOwner != null)
+        {
+            throw new InvalidOperationException(
+                "The bootstrap email already belongs to another user.");
+        }
+
+        user = new ApplicationUser
+        {
+            UserName = username,
+            Email = email,
+            EmailConfirmed = true
+        };
+
+        var createResult =
+            await userManager.CreateAsync(user, password);
+
+        if (!createResult.Succeeded)
+        {
+            throw new InvalidOperationException(
+                "Could not create bootstrap Admin: " +
+                string.Join("; ",
+                    createResult.Errors.Select(e => e.Code)));
+        }
+    }
+    else if (!string.Equals(
+        user.Email, email,
+        StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "The existing bootstrap username has a different email.");
+    }
+
+    // 3. Assign the Admin role.
+    if (!await userManager.IsInRoleAsync(user, adminRole))
+    {
+        var roleResult =
+            await userManager.AddToRoleAsync(user, adminRole);
+
+        if (!roleResult.Succeeded)
+        {
+            throw new InvalidOperationException(
+                "Could not assign Admin role: " +
+                string.Join("; ",
+                    roleResult.Errors.Select(e => e.Code)));
+        }
+    }
+
+    // 4. Validate the configured department.
+    var department = await db.Tbl_Department
+        .FirstOrDefaultAsync(d =>
+            d.DepartmentId == departmentId && d.IsActive);
+
+    if (department == null)
+    {
+        throw new InvalidOperationException(
+            "Bootstrap DepartmentId must identify an active department.");
+    }
+
+    // 5. Create or activate the application profile.
+    var profile = await db.Tbl_UserProfile
+        .FirstOrDefaultAsync(p => p.UserId == user.Id);
+
+    if (profile == null)
+    {
+        profile = new UserProfile
+        {
+            UserId = user.Id,
+            Username = user.UserName!,
+            DisplayName = displayName,
+            Designation = designation,
+            EmailAddress = email,
+            MobileNumber = string.Empty,
+            DeskPhone = string.Empty,
+            DepartmentId = department.DepartmentId,
+            IsActive = true,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        db.Tbl_UserProfile.Add(profile);
+    }
+    else
+    {
+        profile.IsActive = true;
+        profile.DepartmentId = department.DepartmentId;
+        profile.UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    await db.SaveChangesAsync();
+}
+
+
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();

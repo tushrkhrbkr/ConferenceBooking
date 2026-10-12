@@ -32,6 +32,8 @@ namespace ConferenceBooking.Services.AuthAPI.Data
             modelBuilder.Entity<UserProfile>()
                 .ToTable("Tbl_UserProfile");
 
+            modelBuilder.Entity<UserProfile>().Property(x => x.RowVersion).IsRowVersion();
+
             modelBuilder.Entity<RegistrationRequest>()
                 .ToTable("Tbl_RegistrationRequest");
 
@@ -43,6 +45,7 @@ namespace ConferenceBooking.Services.AuthAPI.Data
 
             modelBuilder.Entity<EmailNotificationOutbox>().ToTable("Tbl_EmailNotificationOutbox");
         }
+
 
     }
 }
