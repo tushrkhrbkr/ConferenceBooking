@@ -1120,7 +1120,105 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
         }
-        
+
+        public async Task<ResponseDto> GetPendingRegistrationsAsync()
+        {
+            try
+            {
+                var requests = await _db.Tbl_RegistrationRequest
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.RequestStatus ==
+                        Enums.RegistrationRequestStatus.Pending)
+                    .OrderBy(x => x.SubmittedAtUtc)
+                    .Select(x => new PendingRegistrationDto
+                    {
+                        RegistrationRequestId = x.RegistrationRequestId,
+                        RequestedUserName = x.RequestedUserName,
+                        RequestedDisplayName = x.RequestedDisplayName,
+                        RequestedDesignation = x.RequestedDesignation,
+                        RequestedEmail = x.RequestedEmail,
+                        RequestedMobile = x.RequestedMobile,
+                        RequestedDeskPhone = x.RequestedDeskPhone,
+                        RequestedDepartmentId = x.RequestedDepartmentId,
+                        SubmittedAtUtc = x.SubmittedAtUtc
+                    })
+                    .ToListAsync();
+
+                return new ResponseDto
+                {
+                    IsSuccess = true,
+                    Message = "Pending registrations retrieved successfully.",
+                    Result = requests
+                };
+            }
+            catch
+            {
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    Message = "Unable to retrieve pending registrations."
+                };
+            }
+        }
+
+        public async Task<ResponseDto> GetRegistrationLookupsAsync()
+        {
+            try
+            {
+                // Department options come from Tbl_Department.
+                var departments = await _db.Tbl_Department
+                    .AsNoTracking()
+                    .Where(d => d.IsActive)
+                    .OrderBy(d => d.DepartmentName)
+                    .Select(d => new DepartmentOptionDto
+                    {
+                        DepartmentId = d.DepartmentId,
+                        DepartmentName = d.DepartmentName
+                    })
+                    .ToListAsync();
+
+                // Keep this list aligned with the role allow-list
+                // enforced by ApproveRegistration().
+                var allowedRoleNames = new[]
+                {
+            "ADMIN",
+            "SUBADMIN",
+            "HALLMANAGER",
+            "LOCALUSER",
+            "REMOTEUSER"
+        };
+
+                // Role options come from the Identity AspNetRoles table.
+                var roles = await GetAllowedRegistrationRolesAsync();
+                var roleOptions = roles
+    .Select(roleName => new RoleOptionDto
+    {
+        RoleName = roleName
+    })
+    .ToList();
+
+                return new ResponseDto
+                {
+                    IsSuccess = true,
+                    Message = "Registration lookup data retrieved successfully.",
+                    Result = new RegistrationLookupsDto
+                    {
+                        Departments = departments,
+                        Roles = roleOptions
+                    }
+                };
+            }
+            catch
+            {
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    Message = "Unable to retrieve registration lookup data."
+                };
+            }
+        }
+
         public async Task<bool> AssignRole(string username, string roleName)
         {
             var user = _db.ApplicationUsers.FirstOrDefault(u => u.UserName.ToLower() == username.ToLower());
@@ -1825,5 +1923,58 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return _response;
         }
 
+        private static readonly string[] AllowedRegistrationRoles =
+        {
+            "ADMIN",
+            "SUBADMIN",
+            "HALLMANAGER",
+            "LOCALUSER",
+            "REMOTEUSER"
+        };
+
+        private async Task<List<string>> GetAllowedRegistrationRolesAsync()
+        {
+            // 1. Retrieve roles currently stored in the Identity database.
+            var databaseRoles = _roleManager.Roles
+                .Select(role => role.Name!)
+                .ToList();
+
+            // 2. Create any permitted roles missing from the database.
+            foreach (var roleName in AllowedRegistrationRoles)
+            {
+                if (!databaseRoles.Contains(
+                        roleName,
+                        StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!await _roleManager.RoleExistsAsync(roleName))
+                    {
+                        var result = await _roleManager.CreateAsync(
+                            new IdentityRole(roleName));
+
+                        if (!result.Succeeded)
+                        {
+                            var errors = string.Join(
+                                "; ",
+                                result.Errors.Select(error => error.Description));
+
+                            throw new InvalidOperationException(
+                                $"Unable to create role '{roleName}': {errors}");
+                        }
+                    }
+                }
+            }
+
+            // 3. Retrieve the updated database roles.
+            databaseRoles = _roleManager.Roles
+                .Select(role => role.Name!)
+                .ToList();
+
+            // 4. Return only the permitted registration roles.
+            return AllowedRegistrationRoles
+                .Where(allowedRole => databaseRoles.Contains(
+                    allowedRole,
+                    StringComparer.OrdinalIgnoreCase))
+                .ToList();
+        }
     }
 }

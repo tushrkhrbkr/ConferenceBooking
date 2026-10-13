@@ -63,23 +63,80 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpGet("registrations/pending")]
+        public async Task<IActionResult> GetPendingRegistrations()
+        {
+            var response =
+                await _authService.GetPendingRegistrationsAsync();
+
+            if (!response.IsSuccess)
+            {
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    response);
+            }
+
+            return Ok(response);
+        }
+
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpGet("registrations/lookups")]
+        public async Task<IActionResult> GetRegistrationLookups()
+        {
+            var response =
+                await _authService.GetRegistrationLookupsAsync();
+
+            if (!response.IsSuccess)
+            {
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    response);
+            }
+
+            return Ok(response);
+        }
+
+        [AllowAnonymous]
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginRequestDto model)
+        public async Task<IActionResult> Login(
+    [FromBody] LoginRequestDto model)
         {
             var loginResponse = await _authService.Login(model);
-            if (loginResponse.User == null && loginResponse.Token == "")
+
+            if (loginResponse.User == null &&
+                loginResponse.Token == "pending")
             {
                 _response.IsSuccess = false;
-                _response.Message = "Username or Password is incorrect";
+                _response.Message =
+                    "Your registration is awaiting Admin approval. Please try again after it has been approved.";
+
                 return BadRequest(_response);
             }
-            else if(loginResponse.User == null && loginResponse.Token == "block")
+
+            if (loginResponse.User == null &&
+                loginResponse.Token == "block")
             {
                 _response.IsSuccess = false;
-                _response.Message = "User is blocked. Please contact Administrator.";
+                _response.Message =
+                    "Your account is locked. Please contact the Administrator.";
+
                 return BadRequest(_response);
             }
+
+            if (loginResponse.User == null ||
+                string.IsNullOrWhiteSpace(loginResponse.Token))
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Username or password is incorrect.";
+
+                return BadRequest(_response);
+            }
+
+            _response.IsSuccess = true;
             _response.Result = loginResponse;
+
             return Ok(_response);
         }
 

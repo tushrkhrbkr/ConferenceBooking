@@ -10,7 +10,9 @@ namespace ConferenceBooking.Services.AuthAPI.Service.IService
         Task<ResponseDto> RequestRegistration(RegistrationRequestDto newRequest);
         Task<ResponseDto> ApproveRegistration(ApproveRegistrationDto approveRequest);
         Task<ResponseDto> RejectRegistration(RejectRegistrationDto rejectRequest);
-       
+        Task<ResponseDto> GetPendingRegistrationsAsync();
+        Task<ResponseDto> GetRegistrationLookupsAsync();
+
         Task<bool> AssignRole(string username, string roleName);
         Task<bool> RevokeRole(string username, string roleName);
         ResponseDto GetRole(string userid);

@@ -71,7 +71,11 @@ namespace MUS.Webapp.Controllers
             }
             else
             {
-                ModelState.AddModelError("CustomError", responseDto.Message);
+                ModelState.AddModelError(
+                    "CustomError",
+                    responseDto?.Message
+                        ?? "Unable to sign in. Please try again.");
+
                 return View(obj);
             }
 
@@ -179,6 +183,95 @@ namespace MUS.Webapp.Controllers
             ResponseDto resetRequestDto = await _authService.ForgotPassword(request);
             return View();
         }
-        
+
+
+        [HttpGet]
+        public IActionResult Register()
+        {
+            return View(new RegistrationRequestDto());
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Register(
+            RegistrationRequestDto model)
+        {
+            if (!ModelState.IsValid)
+                return View(model);
+
+            // Check duplicates before attempting registration.
+            var duplicateResponse = await _authService.CheckRegistration(
+                new RegistrationDuplicateCheckDto
+                {
+                    Email = model.Email
+                });
+
+            if (duplicateResponse == null ||
+                !duplicateResponse.IsSuccess)
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Registration service is temporarily unavailable. Please try again.");
+
+                return View(model);
+            }
+
+            RegistrationDuplicateResultDto? duplicate = null;
+
+            if (duplicateResponse.Result != null)
+            {
+                duplicate = JsonConvert.DeserializeObject
+                    <RegistrationDuplicateResultDto>(
+                        Convert.ToString(duplicateResponse.Result) ?? string.Empty);
+            }
+
+            if (duplicate == null)
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Unable to validate the email address. Please try again.");
+
+                return View(model);
+            }
+
+            if (!duplicate.CanRegister)
+            {
+                if (duplicate.RequiresPasswordReset)
+                {
+                    TempData["error"] =
+                        "An account already exists for this email. Please use Forgot Password.";
+
+                    return RedirectToAction(nameof(ForgotPassword));
+                }
+
+                ModelState.AddModelError(
+                    string.Empty,
+                    string.IsNullOrWhiteSpace(duplicate.Message)
+                        ? "This email cannot be registered."
+                        : duplicate.Message);
+
+                return View(model);
+            }
+
+            var response = await _authService.Register(model);
+
+            if (response != null && response.IsSuccess)
+            {
+                TempData["success"] =
+                    "Your registration request has been submitted. " +
+                    "You can log in after the Administrator approves it.";
+
+                return RedirectToAction(nameof(Login));
+            }
+
+            ModelState.AddModelError(
+                string.Empty,
+                response?.Message ??
+                "Registration could not be completed. Please try again.");
+
+            return View(model);
+        }
+
+
     }
 }

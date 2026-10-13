@@ -54,6 +54,9 @@
                         </p> *@
                         <form method="post" class="text-start mb-3">
                             <div class="mb-3">
+                            <div asp-validation-summary="ModelOnly"
+                                 class="text-danger mb-3">
+                            </div>
                                 <label class="form-label" for="example-email">
                                     Username
                                 </label>
@@ -84,10 +87,18 @@
                                         Remember me
                                     </label>
                                 </div>
-                                <a class="text-muted border-bottom border-dashed" href="auth-recoverpw.html">
-                                    Forget Password
+                                <a asp-controller="AuthLogin" asp-action="ForgotPassword" class="text-muted border-bottom border-dashed">
+                                    Forgot Password?
                                 </a>
                             </div>
+
+                            <div class="text-center mt-3">
+                                <span class="text-muted">Don't have an account?</span>
+                                <a asp-controller="AuthLogin" asp-action="Register">
+                                    Register here
+                                </a>
+                            </div>  
+
                             <div class="d-grid">
                                 <button class="btn btn-primary" type="submit">
                                     Login

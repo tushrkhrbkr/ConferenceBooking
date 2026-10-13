@@ -1,0 +1,258 @@
+﻿```cshtml
+@model ConferenceBooking.Web.Models.AuthLogin.PendingRegistrationDto
+
+@using ConferenceBooking.Web.Models.AuthLogin
+
+@{
+    ViewData["Title"] = "Review Registration";
+
+    var departments =
+        ViewBag.Departments as List<DepartmentOptionDto>
+        ?? new List<DepartmentOptionDto>();
+
+    var roles =
+        ViewBag.Roles as List<RoleOptionDto>
+        ?? new List<RoleOptionDto>();
+}
+
+<div class="container-fluid">
+
+    <div class="row mb-3">
+        <div class="col-12 d-flex justify-content-between align-items-center">
+            <div>
+                <h4>Review Registration</h4>
+                <p class="text-muted mb-0">
+                    Review the applicant's details before granting access.
+                </p>
+            </div>
+
+            <a asp-controller="AdminRegistration"
+               asp-action="Index"
+               class="btn btn-light">
+                <i class="ri-arrow-left-line me-1"></i>
+                Back to Pending Requests
+            </a>
+        </div>
+    </div>
+
+    @if (TempData["error"] != null)
+    {
+        <div class="alert alert-danger">
+            @TempData["error"]
+        </div>
+    }
+
+    <div class="card mb-3">
+        <div class="card-header">
+            <h5 class="mb-0">Applicant Details</h5>
+        </div>
+
+        <div class="card-body">
+            <div class="row g-3">
+
+                <div class="col-md-6">
+                    <label class="form-label">Full Name</label>
+                    <input class="form-control"
+                           value="@Model.RequestedDisplayName"
+                           readonly />
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Designation</label>
+                    <input class="form-control"
+                           value="@Model.RequestedDesignation"
+                           readonly />
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Email</label>
+                    <input class="form-control"
+                           value="@Model.RequestedEmail"
+                           readonly />
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Username</label>
+                    <input class="form-control"
+                           value="@Model.RequestedUserName"
+                           readonly />
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Mobile Number</label>
+                    <input class="form-control"
+                           value="@Model.RequestedMobile"
+                           readonly />
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Desk Phone</label>
+                    <input class="form-control"
+                           value="@Model.RequestedDeskPhone"
+                           readonly />
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Registration Request ID</label>
+                    <input class="form-control"
+                           value="@Model.RegistrationRequestId"
+                           readonly />
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Submitted (UTC)</label>
+                    <input class="form-control"
+                           value="@Model.SubmittedAtUtc.ToString("dd-MMM-yyyy HH:mm")"
+                           readonly />
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            <h5 class="mb-0">Approve Registration</h5>
+        </div>
+
+        <div class="card-body">
+
+            @if (!departments.Any() || !roles.Any())
+            {
+                <div class="alert alert-warning">
+                    No active departments or permitted roles were returned.
+                    Check the AuthAPI registration lookup endpoint.
+                </div>
+            }
+            else
+            {
+                <form asp-controller="AdminRegistration"
+                      asp-action="Approve"
+                      method="post">
+
+                    @Html.AntiForgeryToken()
+
+                    <input type="hidden"
+                           name="RegistrationRequestId"
+                           value="@Model.RegistrationRequestId" />
+
+                    <div class="row g-3">
+
+                        <div class="col-md-6">
+                            <label class="form-label"
+                                   for="DepartmentId">
+                                Department
+                            </label>
+
+                            <select class="form-select"
+                                    id="DepartmentId"
+                                    name="DepartmentId"
+                                    required>
+
+                                <option value="">Select Department</option>
+
+                                @foreach (var department in departments)
+                                {
+                                    <option value="@department.DepartmentId">
+                                        @department.DepartmentCode -
+                                        @department.DepartmentName
+                                    </option>
+                                }
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label"
+                                   for="RoleName">
+                                Assign Role
+                            </label>
+
+                            <select class="form-select"
+                                    id="RoleName"
+                                    name="RoleName"
+                                    required>
+
+                                <option value="">Select Role</option>
+
+                                @foreach (var role in roles)
+                                {
+                                    <option value="@role.RoleName">
+                                        @role.DisplayName
+                                    </option>
+                                }
+                            </select>
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label" for="ApprovalRemarks">
+                                Remarks (Optional)
+                            </label>
+
+                            <textarea class="form-control"
+                                  id="ApprovalRemarks"
+                                  name="Remarks"
+                                  rows="3"
+                                  maxlength="1000"
+                                  placeholder="Enter approval remarks, if any"></textarea>
+                        </div>
+
+                        <div class="col-12">
+                            <button type="submit"
+                                    class="btn btn-success"
+                                    onclick="return confirm('Approve this registration and grant the selected role?');">
+                                <i class="ri-check-line me-1"></i>
+                                Approve Registration
+                            </button>
+                        </div>
+
+                    </div>
+                </form>
+            }
+
+        </div>
+    </div>
+
+    <div class="card border-danger">
+        <div class="card-header">
+            <h5 class="mb-0 text-danger">Reject Registration</h5>
+        </div>
+
+        <div class="card-body">
+
+            <form asp-controller="AdminRegistration"
+                  asp-action="Reject"
+                  method="post"
+                  onsubmit="return confirm('Reject this registration request?');">
+
+                @Html.AntiForgeryToken()
+
+                <input type="hidden"
+                       name="RegistrationRequestId"
+                       value="@Model.RegistrationRequestId" />
+
+                <div class="mb-3">
+                    <label class="form-label" for="RejectionRemarks">
+                        Reason for Rejection
+                    </label>
+
+                    <textarea class="form-control"
+                              id="RejectionRemarks"
+                              name="Remarks"
+                              rows="3"
+                              maxlength="1000"
+                              required
+                              placeholder="Explain why this application is being rejected"></textarea>
+                </div>
+
+                <button type="submit" class="btn btn-danger">
+                    <i class="ri-close-line me-1"></i>
+                    Reject Registration
+                </button>
+
+            </form>
+
+        </div>
+    </div>
+
+</div>
+```

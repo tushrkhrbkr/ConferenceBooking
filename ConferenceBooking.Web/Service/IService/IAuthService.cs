@@ -24,5 +24,15 @@ namespace ConferenceBooking.Web.Service.IService
 
         Task<ResponseDto?> ResetPassword(PasswordResetCompleteDto request);
 
+
+        Task<ResponseDto?> CheckRegistration(RegistrationDuplicateCheckDto request);
+
+        Task<ResponseDto?> Register(RegistrationRequestDto request);
+        Task<ResponseDto?> GetPendingRegistrations();
+        Task<ResponseDto?> GetRegistrationLookups();
+        Task<ResponseDto?> ApproveRegistration(ApproveRegistrationDto request);
+        Task<ResponseDto?> RejectRegistration(RejectRegistrationDto request);
+
+
     }
 }

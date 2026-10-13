@@ -79,6 +79,27 @@
                             </span>*@
                         </a>
                     </li>
+                    @if (User.IsInRole("Admin") || User.IsInRole("ADMIN"))
+                    {
+                        <li class="side-nav-title">
+                            Administration
+                        </li>
+
+                        <li class="side-nav-item">
+                            <a class="side-nav-link"
+                               asp-controller="AdminRegistration"
+                               asp-action="Index">
+
+                                <span class="menu-icon">
+                                    <i class="ti ti-user-check"></i>
+                                </span>
+
+                                <span class="menu-text">
+                                    Pending Registrations
+                                </span>
+                            </a>
+                        </li>
+                    }
                     <li class="side-nav-title">
                         Utilities
                     </li>
