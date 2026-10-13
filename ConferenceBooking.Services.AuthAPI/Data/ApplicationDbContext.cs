@@ -17,6 +17,9 @@ namespace ConferenceBooking.Services.AuthAPI.Data
         public DbSet<RegistrationRequest> Tbl_RegistrationRequest { get; set; }
         public DbSet<Department> Tbl_Department { get; set; }
         public DbSet<UserLoginSessions> Tbl_UserLoginSessions { get; set; }
+        public DbSet<PasswordReset> Tbl_PasswordReset { get; set; }
+
+        public DbSet<EmailNotificationOutbox> Tbl_EmailNotificationOutbox { get; set; }
 
         protected override void OnModelCreating(
             ModelBuilder modelBuilder)
@@ -29,14 +32,20 @@ namespace ConferenceBooking.Services.AuthAPI.Data
             modelBuilder.Entity<UserProfile>()
                 .ToTable("Tbl_UserProfile");
 
+            modelBuilder.Entity<UserProfile>().Property(x => x.RowVersion).IsRowVersion();
+
             modelBuilder.Entity<RegistrationRequest>()
                 .ToTable("Tbl_RegistrationRequest");
 
             modelBuilder.Entity<UserLoginSessions>()
                 .ToTable("Tbl_UserLoginSessions");
 
-            
+            modelBuilder.Entity<PasswordReset>()
+                .ToTable("Tbl_PasswordReset");
+
+            modelBuilder.Entity<EmailNotificationOutbox>().ToTable("Tbl_EmailNotificationOutbox");
         }
+
 
     }
 }

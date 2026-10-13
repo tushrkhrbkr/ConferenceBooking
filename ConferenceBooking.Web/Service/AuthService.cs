@@ -11,8 +11,9 @@ namespace ConferenceBooking.Web.Service
         public AuthService(IBaseService baseService)
         {
             _baseService = baseService;
-        }     
+        }
 
+        
         public async Task<ResponseDto?> Login(LoginRequestDto loginRequestDto)
         {
             return await _baseService.SendAsync(new RequestDto()
@@ -22,15 +23,7 @@ namespace ConferenceBooking.Web.Service
                 Data = loginRequestDto
             }, withBearer: false);
         }
-        public async Task<ResponseDto?> LoginBySSO(string username)
-        {
-            return await _baseService.SendAsync(new RequestDto()
-            {
-                ApiType = SD.ApiType.POST,
-                Url = SD.AuthAPIBase + "/api/auth/loginbysso/" + username
-            }, withBearer: false);
-        }
-
+        
         public async Task<ResponseDto?> PasswordChange(PasswordChangeDto model)
         {
             throw new NotImplementedException();
@@ -113,6 +106,204 @@ namespace ConferenceBooking.Web.Service
                 Url = SD.AuthAPIBase + "/api/auth/UpdateUserSession",
                 Data = userLoginSessionsDto
             }, withBearer: false);
+        }
+
+        public async Task<ResponseDto?> ForgotPassword(
+    PasswordResetInternalRequestDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.POST,
+
+                Url = SD.AuthAPIBase +
+                      "/api/auth/password/forgot",
+
+                Data = request
+            },
+            withBearer: false);
+        }
+
+
+        public async Task<ResponseDto?> VerifyPasswordResetOtp(
+            PasswordResetInternalVerifyOtpdto request)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.POST,
+
+                Url = SD.AuthAPIBase +
+                      "/api/auth/password/verify-otp",
+
+                Data = request
+            },
+            withBearer: false);
+        }
+
+
+        public async Task<ResponseDto?> ResetPassword(
+            PasswordResetCompleteDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.POST,
+
+                Url = SD.AuthAPIBase +
+                      "/api/auth/password/reset",
+
+                Data = request
+            },
+            withBearer: false);
+        }
+
+
+        private static Dictionary<string, string> BuildClientIpHeader(
+            string? clientIpAddress)
+        {
+            var headers = new Dictionary<string, string>();
+
+            if (!string.IsNullOrWhiteSpace(clientIpAddress))
+            {
+                headers["X-Client-IP"] = clientIpAddress;
+            }
+
+            return headers;
+        }
+
+
+        public async Task<ResponseDto?> CheckRegistration(
+            RegistrationDuplicateCheckDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.POST,
+                Url = SD.AuthAPIBase + "/api/auth/check-duplicate",
+                Data = request
+            }, withBearer: false);
+        }
+
+        public async Task<ResponseDto?> Register(RegistrationRequestDto request)
+        {
+            var email = request.Email.Trim();
+            var atIndex = email.IndexOf('@');
+
+            if (atIndex <= 0)
+            {
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    Message = "Please enter a valid email address."
+                };
+            }
+
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.POST,
+                Url = SD.AuthAPIBase + "/api/auth/register",
+                Data = new
+                {
+                    Username = email.Substring(0, atIndex),
+                    request.DisplayName,
+                    request.Designation,
+                    Email = email,
+                    request.MobileNumber,
+                    request.DeskPhone,
+                    request.Password,
+                    request.ConfirmPassword
+                }
+            }, withBearer: false);
+        }
+
+        public async Task<ResponseDto?> GetPendingRegistrations()
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.GET,
+                Url = SD.AuthAPIBase + "/api/auth/registrations/pending"
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> GetRegistrationLookups()
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.GET,
+                Url = SD.AuthAPIBase + "/api/auth/registrations/lookups"
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> ApproveRegistration(
+            ApproveRegistrationDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.POST,
+                Url = SD.AuthAPIBase + "/api/auth/approve",
+                Data = request
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> RejectRegistration(
+            RejectRegistrationDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.POST,
+                Url = SD.AuthAPIBase + "/api/auth/reject",
+                Data = request
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> GetDepartments()
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.GET,
+                Url = SD.AuthAPIBase + "/api/auth/departments"
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> CreateDepartment(
+            DepartmentManagementDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.POST,
+                Url = SD.AuthAPIBase + "/api/auth/departments",
+                Data = new
+                {
+                    request.DepartmentCode,
+                    request.DepartmentName
+                }
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> UpdateDepartment(
+            int departmentId,
+            DepartmentManagementDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.PUT,
+                Url = SD.AuthAPIBase + $"/api/auth/departments/{departmentId}",
+                Data = new
+                {
+                    request.DepartmentCode,
+                    request.DepartmentName
+                }
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> SetDepartmentStatus(
+            int departmentId,
+            DepartmentStatusDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.PUT,
+                Url = SD.AuthAPIBase +
+                      $"/api/auth/departments/{departmentId}/status",
+                Data = request
+            }, withBearer: true);
         }
 
     }

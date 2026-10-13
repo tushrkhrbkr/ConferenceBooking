@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace ConferenceBooking.Services.AuthAPI.Controllers
 {
-    [Authorize]
+    
     [Route("api/auth")]
     [ApiController]
     public class AuthAPIController : ControllerBase
@@ -35,6 +35,16 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
+        [HttpPost("check-duplicate")]
+        public async Task<IActionResult> CheckRegistrationDuplicate([FromBody] RegistrationDuplicateCheckDto model)
+        {
+            _response = await _authService.CheckRegistrationAsync(model);
+
+            return Ok(_response);
+        }
+
+
+        [Authorize]
         [HttpPost("approve")]
         public async Task<IActionResult> Approve([FromBody] ApproveRegistrationDto model)
         {
@@ -43,7 +53,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
 
             return Ok(_response);
         }
-
+        [Authorize]
         [HttpPost("reject")]
         public async Task<IActionResult> Reject([FromBody] RejectRegistrationDto model)
         {
@@ -53,27 +63,84 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpGet("registrations/pending")]
+        public async Task<IActionResult> GetPendingRegistrations()
+        {
+            var response =
+                await _authService.GetPendingRegistrationsAsync();
+
+            if (!response.IsSuccess)
+            {
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    response);
+            }
+
+            return Ok(response);
+        }
+
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpGet("registrations/lookups")]
+        public async Task<IActionResult> GetRegistrationLookups()
+        {
+            var response =
+                await _authService.GetRegistrationLookupsAsync();
+
+            if (!response.IsSuccess)
+            {
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    response);
+            }
+
+            return Ok(response);
+        }
+
+        [AllowAnonymous]
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginRequestDto model)
+        public async Task<IActionResult> Login(
+    [FromBody] LoginRequestDto model)
         {
             var loginResponse = await _authService.Login(model);
-            if (loginResponse.User == null && loginResponse.Token == "")
+
+            if (loginResponse.User == null &&
+                loginResponse.Token == "pending")
             {
                 _response.IsSuccess = false;
-                _response.Message = "Username or Password is incorrect";
+                _response.Message =
+                    "Your registration is awaiting Admin approval. Please try again after it has been approved.";
+
                 return BadRequest(_response);
             }
-            else if(loginResponse.User == null && loginResponse.Token == "block")
+
+            if (loginResponse.User == null &&
+                loginResponse.Token == "block")
             {
                 _response.IsSuccess = false;
-                _response.Message = "User is blocked. Please contact Administrator.";
+                _response.Message =
+                    "Your account is locked. Please contact the Administrator.";
+
                 return BadRequest(_response);
             }
+
+            if (loginResponse.User == null ||
+                string.IsNullOrWhiteSpace(loginResponse.Token))
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Username or password is incorrect.";
+
+                return BadRequest(_response);
+            }
+
+            _response.IsSuccess = true;
             _response.Result = loginResponse;
+
             return Ok(_response);
         }
-        
-        
+
+        [Authorize]
         [HttpPost("AssignRole")]
         public async Task<IActionResult> AssignRole([FromBody] ManageRoleDto model)
         {
@@ -87,6 +154,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
+        [Authorize]
         [HttpPost("RevokeRole")]
         public async Task<IActionResult> RevokeRole([FromBody] ManageRoleDto model)
         {
@@ -99,8 +167,8 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             }
             return Ok(_response);
         }
-           
 
+        [Authorize]
         [HttpGet("GetUserRole/{Uid}")]
         public IActionResult GetUserRole(string Uid)
         {
@@ -117,7 +185,8 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
                 return Ok(_response);
             }
         }
-        
+
+        [Authorize]
         [HttpPost("changePassword")]
         public async Task<IActionResult> PasswordChange([FromBody] PasswordChangeDto model)
         {
@@ -131,9 +200,34 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             _response.Result = changePpResponse.Result;
             return Ok(_response);
         }
-        
-        [HttpPost("updateuserdata/{userid}/{displayName}/{email}/{phoneNumber}")]
-        public async Task<IActionResult> UpdateUserData(string userid, string displayName, string email, string phoneNumber)
+
+        [AllowAnonymous]
+        [HttpPost("password/forgot")]
+        public async Task<IActionResult> ForgotPassword([FromBody] PasswordResetRequestDto request)
+        {
+            _response = await _authService.ForgotPasswordAsync(request);
+            return Ok(_response);
+        }
+
+        [AllowAnonymous]
+        [HttpPost("password/verify-otp")]
+        public async Task<IActionResult> VerifyPasswordResetOtp([FromBody] PasswordResetVerifyOtpDto request)
+        {
+            _response = await _authService.VerifyPasswordResetOtpAsync(request);
+            return Ok(_response);
+        }
+
+        [AllowAnonymous]
+        [HttpPost("password/reset")]
+        public async Task<IActionResult> ResetPassword([FromBody] PasswordResetCompleteDto request)
+        {
+            _response = await _authService.ResetPasswordAsync(request);
+            return Ok(_response);
+        }
+
+        [Authorize]
+        [HttpPost("updateuserdata/{userid}/{displayName}/{phoneNumber}")]
+        public async Task<IActionResult> UpdateUserData(string userid, string displayName, string phoneNumber)
         {
             var response = await _authService.UpdateUserData(userid, displayName, phoneNumber);
             if (response.Result == null && !response.IsSuccess)
@@ -205,6 +299,60 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
                 _response.Result = response.Result;
                 return Ok(_response);
             }
+        }
+
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpGet("departments")]
+        public async Task<IActionResult> GetDepartments()
+        {
+            var response = await _authService.GetDepartmentsAsync();
+
+            if (!response.IsSuccess)
+                return StatusCode(500, response);
+
+            return Ok(response);
+        }
+
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpPost("departments")]
+        public async Task<IActionResult> CreateDepartment(
+            [FromBody] DepartmentUpsertDto request)
+        {
+            var response = await _authService.CreateDepartmentAsync(request);
+
+            if (!response.IsSuccess)
+                return BadRequest(response);
+
+            return Ok(response);
+        }
+
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpPut("departments/{id:int}")]
+        public async Task<IActionResult> UpdateDepartment(
+            int id,
+            [FromBody] DepartmentUpsertDto request)
+        {
+            var response = await _authService.UpdateDepartmentAsync(id, request);
+
+            if (!response.IsSuccess)
+                return BadRequest(response);
+
+            return Ok(response);
+        }
+
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpPut("departments/{id:int}/status")]
+        public async Task<IActionResult> SetDepartmentStatus(
+            int id,
+            [FromBody] DepartmentStatusDto request)
+        {
+            var response =
+                await _authService.SetDepartmentStatusAsync(id, request);
+
+            if (!response.IsSuccess)
+                return BadRequest(response);
+
+            return Ok(response);
         }
 
     }

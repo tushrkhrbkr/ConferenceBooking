@@ -21,8 +21,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         private readonly IJwtTokenGenerator _jwtTokenGenerator;
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IMapper _mapper;
+        private readonly IOtpService _otpService;
+        private readonly IPasswordResetTokenService _passwordResetTokenService;
+        private readonly IEmailNotificationService _emailNotificationService;
+        private readonly ILogger<AuthService> _logger;
 
-        public AuthService(ApplicationDbContext db,UserManager<ApplicationUser> userManager,SignInManager<ApplicationUser> signInManager,RoleManager<IdentityRole>roleManager, IJwtTokenGenerator jwtTokenGenerator, IMapper mapper)
+        public AuthService(ApplicationDbContext db,UserManager<ApplicationUser> userManager,SignInManager<ApplicationUser> signInManager,RoleManager<IdentityRole>roleManager, IJwtTokenGenerator jwtTokenGenerator, IMapper mapper, IOtpService otpService, IPasswordResetTokenService passwordResetTokenService, IEmailNotificationService emailNotificationService, ILogger<AuthService> logger)
         {
             _db = db;
             _response = new ResponseDto();
@@ -31,6 +35,10 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             _roleManager = roleManager;
             _jwtTokenGenerator = jwtTokenGenerator;
             _mapper = mapper;
+            _otpService = otpService;
+            _passwordResetTokenService = passwordResetTokenService;
+            _emailNotificationService = emailNotificationService;
+            _logger = logger;
         }
 
         public async Task<LoginResponseDto> Login(LoginRequestDto loginRequestDto)
@@ -233,13 +241,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
         public async Task<ResponseDto> RequestRegistration(RegistrationRequestDto newRequest)
         {
-            var response = new ResponseDto();
-
             if (newRequest == null)
             {
-                response.IsSuccess = false;
-                response.Message = "Registration request is required.";
-                return response;
+                _response.IsSuccess = false;
+                _response.Message = "Registration request is required.";
+                return _response;
             }
 
             await using var transaction =
@@ -248,8 +254,19 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
             try
             {
-                var username = newRequest.Username.Trim();
                 var email = newRequest.Email.Trim().ToLowerInvariant();
+
+                var atIndex = email.IndexOf('@');
+
+                if (atIndex <= 0 || atIndex == email.Length - 1)
+                {
+                    _response.IsSuccess = false;
+                    _response.Message = "A valid email address is required.";
+                    return _response;
+                }
+
+                // Username is ALWAYS derived from email.
+                var username = email[..atIndex];
 
                 // ---------------------------------------------------------
                 // 1. Validate duplicate Identity username
@@ -259,12 +276,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingUserByUsername != null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "An account with this username already exists.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -275,12 +292,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingUserByEmail != null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "An account with this email address already exists.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -295,12 +312,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingRequest != null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "A registration request for this username is already pending.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -316,12 +333,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                     if (!departmentExists)
                     {
-                        response.IsSuccess = false;
-                        response.Message =
+                        _response.IsSuccess = false;
+                        _response.Message =
                             "The selected department is not active.";
 
                         await transaction.RollbackAsync();
-                        return response;
+                        return _response;
                     }
                 }
 
@@ -345,14 +362,14 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (!createUserResult.Succeeded)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         string.Join(
                             "; ",
                             createUserResult.Errors.Select(x => x.Description));
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -419,11 +436,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 // ---------------------------------------------------------
                 await transaction.CommitAsync();
 
-                response.IsSuccess = true;
-                response.Message =
+                _response.IsSuccess = true;
+                _response.Message =
                     "Registration request submitted successfully.";
 
-                response.Result =
+                _response.Result =
                     new
                     {
                         RegistrationRequestId =
@@ -437,17 +454,17 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                             Enums.RegistrationRequestStatus.Pending
                     };
 
-                return response;
+                return _response;
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
 
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Registration could not be completed." + ex.Message;
 
-                return response;
+                return _response;
             }
         }
 
@@ -455,14 +472,20 @@ namespace ConferenceBooking.Services.AuthAPI.Service
         {
             try
             {
+                var Result = new RegistrationDuplicateResultDto();
+
                 if (newRequest == null || string.IsNullOrWhiteSpace(newRequest.Email))
                 {
-                    _response.Result = new RegistrationDuplicateResultDto
+                    Result = new RegistrationDuplicateResultDto
                     {
                         Status = RegistrationDuplicateStatus.RegistrationBlocked,
                         CanRegister = false,
                         Message = "Email address is required."
                     };
+
+                    _response.Result = Result;
+                    _response.Message = Result.Message;
+                    return _response;
                 }
 
                 var email = newRequest.Email.Trim().ToLowerInvariant();
@@ -471,12 +494,15 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (atIndex <= 0 || atIndex == email.Length - 1)
                 {
-                    _response.Result = new RegistrationDuplicateResultDto
+                    Result = new RegistrationDuplicateResultDto
                     {
                         Status = RegistrationDuplicateStatus.RegistrationBlocked,
                         CanRegister = false,
                         Message = "A valid email address is required."
                     };
+                    _response.Result = Result;
+                    _response.Message = Result.Message;
+                    return _response;
                 }
 
                 // Username is ALWAYS derived from email.
@@ -493,7 +519,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 var userByEmail = await _userManager.FindByEmailAsync(email);
 
                 // Either username or email identifies an existing account.
-                var existingUser =  userByUsername ?? userByEmail;
+                var existingUser = userByUsername ?? userByEmail;
 
                 // ---------------------------------------------------------
                 // 3. Check pending registration request
@@ -527,9 +553,9 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     // -----------------------------------------------------
                     if (profile != null && profile.IsActive)
                     {
-                        _response.Result = new RegistrationDuplicateResultDto
+                        Result = new RegistrationDuplicateResultDto
                         {
-                            Status =  RegistrationDuplicateStatus.AccountExists,
+                            Status = RegistrationDuplicateStatus.AccountExists,
 
                             UserName = existingUser.UserName ?? username,
 
@@ -540,6 +566,9 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                             Message = "An account with this email address already exists. " +
                                       "Please use the Forgot Password option."
                         };
+                        _response.Result = Result;
+                        _response.Message = Result.Message;
+                        return _response;
                     }
 
                     // -----------------------------------------------------
@@ -547,7 +576,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     // -----------------------------------------------------
                     if (pendingRequest != null)
                     {
-                        _response.Result = new RegistrationDuplicateResultDto
+                        Result = new RegistrationDuplicateResultDto
                         {
                             Status = RegistrationDuplicateStatus.RegistrationPending,
 
@@ -561,14 +590,19 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                             Message = "A registration request for this account is already pending."
                         };
+                        _response.Result = Result;
+                        _response.Message = Result.Message;
+                        return _response;
                     }
+
 
                     // -----------------------------------------------------
                     // Identity user exists but profile/request state
                     // is inconsistent.
                     // Do NOT allow another account to be created.
                     // -----------------------------------------------------
-                    _response.Result = new RegistrationDuplicateResultDto
+
+                    Result = new RegistrationDuplicateResultDto
                     {
                         Status = RegistrationDuplicateStatus.RegistrationBlocked,
 
@@ -583,46 +617,56 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                             "registration state could not be determined. " +
                             "Please contact the Administrator."
                     };
+                    _response.Result = Result;
+                    _response.Message = Result.Message;
+                    return _response;
 
-                    // ---------------------------------------------------------
-                    // 5. No Identity user, but pending request exists.
-                    // This protects against partially inconsistent data.
-                    // ---------------------------------------------------------
-                    if (pendingRequest != null)
+                }
+                // ---------------------------------------------------------
+                // 5. No Identity user, but pending request exists.
+                // This protects against partially inconsistent data.
+                // ---------------------------------------------------------
+                if (pendingRequest != null)
+                {
+                    Result = new RegistrationDuplicateResultDto
                     {
-                        _response.Result = new RegistrationDuplicateResultDto
-                        {
-                            Status = RegistrationDuplicateStatus.RegistrationPending,
-
-                            UserName = username,
-
-                            CanRegister = false,
-
-                            RequiresPasswordReset = false,
-
-                            RegistrationRequestId = pendingRequest.RegistrationRequestId,
-
-                            Message = "A registration request for this email address is already pending."
-                        };
-                    }
-
-
-                    // ---------------------------------------------------------
-                    // 6. No duplicate
-                    // ---------------------------------------------------------
-                    _response.Result = new RegistrationDuplicateResultDto
-                    {
-                        Status = RegistrationDuplicateStatus.None,
+                        Status = RegistrationDuplicateStatus.RegistrationPending,
 
                         UserName = username,
 
-                        CanRegister = true,
+                        CanRegister = false,
 
                         RequiresPasswordReset = false,
 
-                        Message = "Registration is available."
+                        RegistrationRequestId = pendingRequest.RegistrationRequestId,
+
+                        Message = "A registration request for this email address is already pending."
                     };
+                    _response.Result = Result;
+                    _response.Message = Result.Message;
+                    return _response;
                 }
+
+
+                // ---------------------------------------------------------
+                // 6. No duplicate
+                // ---------------------------------------------------------
+                Result = new RegistrationDuplicateResultDto
+                {
+                    Status = RegistrationDuplicateStatus.None,
+
+                    UserName = username,
+
+                    CanRegister = true,
+
+                    RequiresPasswordReset = false,
+
+                    Message = "Registration is available."
+                };
+                _response.Result = Result;
+                _response.Message = Result.Message;
+                return _response;
+
 
             }
             catch (Exception ex)
@@ -635,15 +679,13 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
         public async Task<ResponseDto> ApproveRegistration(ApproveRegistrationDto approveRequest)
         {
-            var response = new ResponseDto();
-
             if (approveRequest == null)
             {
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Approval request is required.";
 
-                return response;
+                return _response;
             }
 
             await using var transaction =
@@ -663,12 +705,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingRequest == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "Registration request not found.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -677,12 +719,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 if (existingRequest.RequestStatus !=
                     Enums.RegistrationRequestStatus.Pending)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "This registration request has already been processed.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -697,12 +739,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (department == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "The selected department is not active.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -724,12 +766,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         roleName,
                         StringComparer.OrdinalIgnoreCase))
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "Invalid role selected.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -741,12 +783,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (user == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "The Identity account associated with this request was not found.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -759,12 +801,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (userProfile == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "The user profile associated with this request was not found.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -772,12 +814,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 // ---------------------------------------------------------
                 if (userProfile.IsActive)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "The user profile is already active.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -794,15 +836,15 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                     if (!createRoleResult.Succeeded)
                     {
-                        response.IsSuccess = false;
-                        response.Message =
+                        _response.IsSuccess = false;
+                        _response.Message =
                             string.Join(
                                 "; ",
                                 createRoleResult.Errors
                                     .Select(x => x.Description));
 
                         await transaction.RollbackAsync();
-                        return response;
+                        return _response;
                     }
 
                     role =
@@ -832,15 +874,15 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                     if (!removeRolesResult.Succeeded)
                     {
-                        response.IsSuccess = false;
-                        response.Message =
+                        _response.IsSuccess = false;
+                        _response.Message =
                             string.Join(
                                 "; ",
                                 removeRolesResult.Errors
                                     .Select(x => x.Description));
 
                         await transaction.RollbackAsync();
-                        return response;
+                        return _response;
                     }
                 }
 
@@ -854,15 +896,15 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (!addRoleResult.Succeeded)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         string.Join(
                             "; ",
                             addRoleResult.Errors
                                 .Select(x => x.Description));
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -910,11 +952,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 // ---------------------------------------------------------
                 await transaction.CommitAsync();
 
-                response.IsSuccess = true;
-                response.Message =
+                _response.IsSuccess = true;
+                _response.Message =
                     "Registration approved successfully.";
 
-                response.Result =
+                _response.Result =
                     new
                     {
                         UserId = user.Id,
@@ -927,31 +969,29 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         Role = roleName
                     };
 
-                return response;
+                return _response;
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
 
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Registration approval failed." + ex.Message;
 
-                return response;
+                return _response;
             }
         }
 
         public async Task<ResponseDto> RejectRegistration(RejectRegistrationDto rejectRequest)
         {
-            var response = new ResponseDto();
-
             if (rejectRequest == null)
             {
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Rejection request is required.";
 
-                return response;
+                return _response;
             }
 
             await using var transaction =
@@ -971,12 +1011,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 if (existingRequest == null)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "Registration request not found.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -985,12 +1025,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 if (existingRequest.RequestStatus !=
                     Enums.RegistrationRequestStatus.Pending)
                 {
-                    response.IsSuccess = false;
-                    response.Message =
+                    _response.IsSuccess = false;
+                    _response.Message =
                         "This registration request has already been processed.";
 
                     await transaction.RollbackAsync();
-                    return response;
+                    return _response;
                 }
 
                 // ---------------------------------------------------------
@@ -1051,11 +1091,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 // ---------------------------------------------------------
                 await transaction.CommitAsync();
 
-                response.IsSuccess = true;
-                response.Message =
+                _response.IsSuccess = true;
+                _response.Message =
                     "Registration rejected successfully.";
 
-                response.Result =
+                _response.Result =
                     new
                     {
                         RegistrationRequestId =
@@ -1065,22 +1105,407 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                             Enums.RegistrationRequestStatus.Rejected
                     };
 
-                return response;
+                return _response;
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
 
-                response.IsSuccess = false;
-                response.Message =
+                _response.IsSuccess = false;
+                _response.Message =
                     "Registration rejection failed." + ex.Message;
 
 
 
-                return response;
+                return _response;
             }
         }
-        
+
+        public async Task<ResponseDto> GetPendingRegistrationsAsync()
+        {
+            try
+            {
+                var requests = await _db.Tbl_RegistrationRequest
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.RequestStatus ==
+                        Enums.RegistrationRequestStatus.Pending)
+                    .OrderBy(x => x.SubmittedAtUtc)
+                    .Select(x => new PendingRegistrationDto
+                    {
+                        RegistrationRequestId = x.RegistrationRequestId,
+                        RequestedUserName = x.RequestedUserName,
+                        RequestedDisplayName = x.RequestedDisplayName,
+                        RequestedDesignation = x.RequestedDesignation,
+                        RequestedEmail = x.RequestedEmail,
+                        RequestedMobile = x.RequestedMobile,
+                        RequestedDeskPhone = x.RequestedDeskPhone,
+                        RequestedDepartmentId = x.RequestedDepartmentId,
+                        SubmittedAtUtc = x.SubmittedAtUtc
+                    })
+                    .ToListAsync();
+
+                return new ResponseDto
+                {
+                    IsSuccess = true,
+                    Message = "Pending registrations retrieved successfully.",
+                    Result = requests
+                };
+            }
+            catch
+            {
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    Message = "Unable to retrieve pending registrations."
+                };
+            }
+        }
+        public async Task<ResponseDto> GetRegistrationLookupsAsync()
+        {
+            try
+            {
+                // 1. Read existing Identity roles from the database.
+                var existingRoles = await _roleManager.Roles
+                    .ToListAsync();
+
+                // 2. Create permitted roles that are missing.
+                foreach (var roleName in AllowedRegistrationRoles)
+                {
+                    var exists = existingRoles.Any(role =>
+                        string.Equals(
+                            role.Name,
+                            roleName,
+                            StringComparison.OrdinalIgnoreCase));
+
+                    if (exists)
+                        continue;
+
+                    var createResult = await _roleManager.CreateAsync(
+                        new IdentityRole(roleName));
+
+                    if (!createResult.Succeeded)
+                    {
+                        // Account for a concurrent request creating the role.
+                        if (!await _roleManager.RoleExistsAsync(roleName))
+                        {
+                            throw new InvalidOperationException(
+                                $"Could not create role '{roleName}': " +
+                                string.Join(
+                                    "; ",
+                                    createResult.Errors.Select(
+                                        error => error.Description)));
+                        }
+                    }
+                }
+
+                // 3. Retrieve roles again after synchronization.
+                existingRoles = await _roleManager.Roles.ToListAsync();
+
+                // 4. Return only permitted roles.
+                var roleOptions = AllowedRegistrationRoles
+                    .Where(allowedName => existingRoles.Any(role =>
+                        string.Equals(
+                            role.Name,
+                            allowedName,
+                            StringComparison.OrdinalIgnoreCase)))
+                    .Select(roleName => new RoleOptionDto
+                    {
+                        RoleName = roleName,
+                        DisplayName = roleName
+                    })
+                    .ToList();
+
+                // 5. Return active departments.
+                var departments = await _db.Tbl_Department
+                    .AsNoTracking()
+                    .Where(department => department.IsActive)
+                    .OrderBy(department => department.DepartmentName)
+                    .Select(department => new DepartmentOptionDto
+                    {
+                        DepartmentId = department.DepartmentId,
+                        DepartmentCode = department.DepartmentCode,
+                        DepartmentName = department.DepartmentName
+                    })
+                    .ToListAsync();
+
+                return new ResponseDto
+                {
+                    IsSuccess = true,
+                    Message = "Registration lookup data retrieved successfully.",
+                    Result = new RegistrationLookupsDto
+                    {
+                        Departments = departments,
+                        Roles = roleOptions
+                    }
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to retrieve registration lookup data.");
+
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    Message = "Unable to retrieve registration lookup data."
+                };
+            }
+        }
+
+        public async Task<ResponseDto> GetDepartmentsAsync()
+        {
+            var response = new ResponseDto();
+
+            try
+            {
+                var departments = await _db.Tbl_Department
+                    .AsNoTracking()
+                    .OrderBy(d => d.DepartmentName)
+                    .Select(d => new DepartmentDto
+                    {
+                        DepartmentId = d.DepartmentId,
+                        DepartmentCode = d.DepartmentCode,
+                        DepartmentName = d.DepartmentName,
+                        IsActive = d.IsActive,
+                        CreatedAtUtc = d.CreatedAtUtc,
+                        UpdatedAtUtc = d.UpdatedAtUtc
+                    })
+                    .ToListAsync();
+
+                response.IsSuccess = true;
+                response.Result = departments;
+                response.Message = "Departments retrieved successfully.";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to retrieve departments.");
+                response.IsSuccess = false;
+                response.Message = "Unable to retrieve departments.";
+            }
+
+            return response;
+        }
+
+        public async Task<ResponseDto> CreateDepartmentAsync(
+    DepartmentUpsertDto request)
+        {
+            var response = new ResponseDto();
+
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.DepartmentCode) ||
+                string.IsNullOrWhiteSpace(request.DepartmentName))
+            {
+                response.IsSuccess = false;
+                response.Message = "Department code and name are required.";
+                return response;
+            }
+
+            var code = request.DepartmentCode.Trim().ToUpperInvariant();
+            var name = request.DepartmentName.Trim();
+
+            try
+            {
+                var exists = await _db.Tbl_Department.AnyAsync(d =>
+                    d.DepartmentCode.ToUpper() == code);
+
+                if (exists)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "This department code already exists.";
+                    return response;
+                }
+
+                var department = new Department
+                {
+                    DepartmentCode = code,
+                    DepartmentName = name,
+                    IsActive = true,
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+
+                await _db.Tbl_Department.AddAsync(department);
+                await _db.SaveChangesAsync();
+
+                response.IsSuccess = true;
+                response.Message = "Department created successfully.";
+                response.Result = new DepartmentDto
+                {
+                    DepartmentId = department.DepartmentId,
+                    DepartmentCode = department.DepartmentCode,
+                    DepartmentName = department.DepartmentName,
+                    IsActive = department.IsActive,
+                    CreatedAtUtc = department.CreatedAtUtc,
+                    UpdatedAtUtc = department.UpdatedAtUtc
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create department.");
+                response.IsSuccess = false;
+                response.Message = "Unable to create department.";
+            }
+
+            return response;
+        }
+
+        public async Task<ResponseDto> UpdateDepartmentAsync(
+    int departmentId,
+    DepartmentUpsertDto request)
+        {
+            var response = new ResponseDto();
+
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.DepartmentCode) ||
+                string.IsNullOrWhiteSpace(request.DepartmentName))
+            {
+                response.IsSuccess = false;
+                response.Message = "Department code and name are required.";
+                return response;
+            }
+
+            var code = request.DepartmentCode.Trim().ToUpperInvariant();
+            var name = request.DepartmentName.Trim();
+
+            try
+            {
+                var department = await _db.Tbl_Department
+                    .FirstOrDefaultAsync(d => d.DepartmentId == departmentId);
+
+                if (department == null)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Department not found.";
+                    return response;
+                }
+
+                var duplicateCode = await _db.Tbl_Department.AnyAsync(d =>
+                    d.DepartmentId != departmentId &&
+                    d.DepartmentCode.ToUpper() == code);
+
+                if (duplicateCode)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "This department code already exists.";
+                    return response;
+                }
+
+                department.DepartmentCode = code;
+                department.DepartmentName = name;
+                department.UpdatedAtUtc = DateTime.UtcNow;
+
+                await _db.SaveChangesAsync();
+
+                response.IsSuccess = true;
+                response.Message = "Department updated successfully.";
+                response.Result = new DepartmentDto
+                {
+                    DepartmentId = department.DepartmentId,
+                    DepartmentCode = department.DepartmentCode,
+                    DepartmentName = department.DepartmentName,
+                    IsActive = department.IsActive,
+                    CreatedAtUtc = department.CreatedAtUtc,
+                    UpdatedAtUtc = department.UpdatedAtUtc
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to update department {DepartmentId}.",
+                    departmentId);
+
+                response.IsSuccess = false;
+                response.Message = "Unable to update department.";
+            }
+
+            return response;
+        }
+
+        public async Task<ResponseDto> SetDepartmentStatusAsync(
+    int departmentId,
+    DepartmentStatusDto request)
+        {
+            var response = new ResponseDto();
+
+            try
+            {
+                var department = await _db.Tbl_Department
+                    .FirstOrDefaultAsync(d => d.DepartmentId == departmentId);
+
+                if (department == null)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Department not found.";
+                    return response;
+                }
+
+                if (!request.IsActive && department.IsActive)
+                {
+                    var hasActiveUsers = await _db.Tbl_UserProfile
+                        .AnyAsync(p =>
+                            p.DepartmentId == departmentId &&
+                            p.IsActive);
+
+                    if (hasActiveUsers)
+                    {
+                        response.IsSuccess = false;
+                        response.Message =
+                            "This department has active users. Reassign those users before deactivating it.";
+                        return response;
+                    }
+
+                    var hasPendingRegistrations =
+                        await _db.Tbl_RegistrationRequest.AnyAsync(r =>
+                            r.RequestedDepartmentId == departmentId &&
+                            r.RequestStatus ==
+                                Enums.RegistrationRequestStatus.Pending);
+
+                    if (hasPendingRegistrations)
+                    {
+                        response.IsSuccess = false;
+                        response.Message =
+                            "This department has pending registration requests. Resolve those requests before deactivating it.";
+                        return response;
+                    }
+                }
+
+                department.IsActive = request.IsActive;
+                department.UpdatedAtUtc = DateTime.UtcNow;
+
+                await _db.SaveChangesAsync();
+
+                response.IsSuccess = true;
+                response.Message = request.IsActive
+                    ? "Department activated successfully."
+                    : "Department deactivated successfully.";
+
+                response.Result = new DepartmentDto
+                {
+                    DepartmentId = department.DepartmentId,
+                    DepartmentCode = department.DepartmentCode,
+                    DepartmentName = department.DepartmentName,
+                    IsActive = department.IsActive,
+                    CreatedAtUtc = department.CreatedAtUtc,
+                    UpdatedAtUtc = department.UpdatedAtUtc
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to change department status for {DepartmentId}.",
+                    departmentId);
+
+                response.IsSuccess = false;
+                response.Message = "Unable to change department status.";
+            }
+
+            return response;
+        }
+
+
         public async Task<bool> AssignRole(string username, string roleName)
         {
             var user = _db.ApplicationUsers.FirstOrDefault(u => u.UserName.ToLower() == username.ToLower());
@@ -1168,6 +1593,502 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return _response;
         }
 
+        public async Task<ResponseDto> ForgotPasswordAsync(PasswordResetRequestDto request)
+        {
+            const string genericMessage =
+                "If an account exists for this email address, " +
+                "an OTP has been sent.";
+
+            // Always return a generic response to prevent account enumeration.
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.Email))
+            {
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+
+            var email = request.Email.Trim().ToLowerInvariant();
+            var atIndex = email.IndexOf('@');
+
+            if (atIndex <= 0 || atIndex == email.Length - 1)
+            {
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+
+            // Find the Identity user.
+            var user = await _userManager.FindByEmailAsync(email);
+
+            if (user == null)
+            {
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+
+            // Serialize concurrent OTP requests for the same user.
+            await using var transaction =
+                await _db.Database.BeginTransactionAsync(
+                    System.Data.IsolationLevel.Serializable);
+
+            try
+            {
+                await AcquirePasswordResetLockAsync(user.Id);
+
+                // Confirm that the application profile exists and is active.
+                var profile = await _db.Tbl_UserProfile
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x =>
+                        x.UserId == user.Id &&
+                        x.EmailAddress == email);
+
+                if (profile == null || !profile.IsActive)
+                {
+                    await transaction.RollbackAsync();
+
+                    _response.IsSuccess = true;
+                    _response.Message = genericMessage;
+                    _response.Result = null;
+
+                    return _response;
+                }
+
+                var nowUtc = DateTime.UtcNow;
+
+                // Rate limit: maximum five requests in the previous hour.
+                var oneHourAgoUtc = nowUtc.AddHours(-1);
+
+                var otpRequestCount = await _db.Tbl_PasswordReset
+                    .AsNoTracking()
+                    .CountAsync(x =>
+                        x.UserId == user.Id &&
+                        x.CreatedAtUtc >= oneHourAgoUtc);
+
+                if (otpRequestCount >= 5)
+                {
+                    await transaction.RollbackAsync();
+
+                    _response.IsSuccess = true;
+                    _response.Message = genericMessage;
+                    _response.Result = null;
+
+                    return _response;
+                }
+
+                // Resend cooldown: at least 60 seconds between requests.
+                var cooldownFromUtc = nowUtc.AddSeconds(-60);
+
+                var recentRequest = await _db.Tbl_PasswordReset
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.UserId == user.Id &&
+                        x.CreatedAtUtc >= cooldownFromUtc)
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefaultAsync();
+
+                if (recentRequest != null)
+                {
+                    await transaction.RollbackAsync();
+
+                    _response.IsSuccess = true;
+                    _response.Message = genericMessage;
+                    _response.Result = null;
+
+                    return _response;
+                }
+
+                // Generate the OTP and store only its hash in PasswordReset.
+                var otp = _otpService.GenerateOtp();
+                var otpHash = _otpService.HashOtp(otp);
+
+                const int otpValidityMinutes = 5;
+
+                var passwordReset = new PasswordReset
+                {
+                    UserId = user.Id,
+                    EmailAddress = email,
+                    OtpHash = otpHash,
+                    OtpExpiresAtUtc =
+                        nowUtc.AddMinutes(otpValidityMinutes),
+                    OtpAttemptCount = 0,
+                    OtpMaxAttempts = 5,
+                    CreatedAtUtc = nowUtc,
+                    RequestedIpAddress = request.IpAddress
+                };
+
+                await _db.Tbl_PasswordReset.AddAsync(passwordReset);
+
+                // Queue the email in the SAME DbContext and transaction.
+                // The OTP is included only in the protected outbox payload.
+                var emailPayload = new PasswordResetOtpEmailPayloadDto
+                {
+                    Otp = otp,
+                    ValidityMinutes = otpValidityMinutes
+                };
+
+                await _emailNotificationService.EnqueueAsync(
+                    eventType: EmailEventTypes.PasswordResetOtp,
+                    toEmail: email,
+                    payload: emailPayload,
+                    subject: "CONVENE - Password Reset OTP");
+
+                // EnqueueAsync calls SaveChangesAsync using this DbContext.
+                // Both PasswordReset and EmailNotificationOutbox are still
+                // inside this transaction until CommitAsync succeeds.
+                await transaction.CommitAsync();
+
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+            catch
+            {
+                // If the reset record or outbox insert fails, do not commit
+                // either operation.
+                try
+                {
+                    await transaction.RollbackAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "Failed to roll back the password-reset transaction.");
+                }
+
+                // Do not return exception details, OTP, or payload to WebApp.
+                _response.IsSuccess = true;
+                _response.Message = genericMessage;
+                _response.Result = null;
+
+                return _response;
+            }
+        }
+
+        public async Task<ResponseDto> VerifyPasswordResetOtpAsync(PasswordResetVerifyOtpDto request)
+        {
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.Email) ||
+                string.IsNullOrWhiteSpace(request.Otp))
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Email address and OTP are required.";
+
+                return _response;
+            }
+
+            var email = request.Email
+                .Trim()
+                .ToLowerInvariant();
+
+            var user = await _userManager.FindByEmailAsync(email);
+
+            if (user == null)
+            {
+                _response.IsSuccess = false;
+                _response.Message = "Invalid or expired OTP.";
+
+                return _response;
+            }
+
+
+            var otp = request.Otp.Trim();
+
+            if (otp.Length != 6 ||
+                !otp.All(char.IsDigit))
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid OTP.";
+
+                return _response;
+            }
+
+            await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            await AcquirePasswordResetLockAsync(user.Id);
+
+            var resetRequest =
+                await _db.Tbl_PasswordReset
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefaultAsync(x =>
+                        x.EmailAddress == email &&
+                        x.ConsumedAtUtc == null);
+
+            if (resetRequest == null)
+            {
+                await transaction.RollbackAsync();
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired OTP.";
+
+                return _response;
+            }
+
+            
+
+            if (resetRequest.OtpVerifiedAtUtc != null)
+            {
+                await transaction.RollbackAsync();
+                _response.IsSuccess = false;
+                _response.Message =
+                    "OTP has already been verified.";
+
+                return _response;
+            }
+
+            if (resetRequest.OtpExpiresAtUtc <= DateTime.UtcNow)
+            {
+                await transaction.RollbackAsync();
+                _response.IsSuccess = false;
+                _response.Message =
+                    "OTP has expired.";
+
+                return _response;
+            }
+
+            if (resetRequest.OtpAttemptCount >=
+                resetRequest.OtpMaxAttempts)
+            {
+                await transaction.RollbackAsync();
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Maximum OTP attempts exceeded.";
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Increment attempt BEFORE comparison
+            // ---------------------------------------------------------
+
+            resetRequest.OtpAttemptCount++;
+
+            var suppliedHash =
+                _otpService.HashOtp(otp);
+
+            if (!string.Equals(
+                    suppliedHash,
+                    resetRequest.OtpHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await _db.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired OTP.";
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // OTP correct
+            // ---------------------------------------------------------
+
+            resetRequest.OtpVerifiedAtUtc =
+                DateTime.UtcNow;
+
+            resetRequest.VerifiedIpAddress =
+                request.IpAddress;
+
+            var resetToken =
+                _passwordResetTokenService.GenerateToken();
+
+            resetRequest.ResetTokenHash =
+                _passwordResetTokenService
+                    .HashToken(resetToken);
+
+            resetRequest.ResetTokenExpiresAtUtc =
+                DateTime.UtcNow.AddMinutes(10);
+
+            await _db.SaveChangesAsync();
+
+            await transaction.CommitAsync();
+
+            _response.IsSuccess = true;
+            _response.Message =
+                "OTP verified successfully.";
+
+            _response.Result = new
+            {
+                ResetToken = resetToken
+            };
+
+            return _response;
+        }
+
+        public async Task<ResponseDto> ResetPasswordAsync(PasswordResetCompleteDto request)
+        {
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.ResetToken) ||
+                string.IsNullOrWhiteSpace(request.NewPassword) ||
+                string.IsNullOrWhiteSpace(request.ConfirmPassword))
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "All password reset fields are required.";
+
+                return _response;
+            }
+
+            if (request.NewPassword !=
+                request.ConfirmPassword)
+            {
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Passwords do not match.";
+
+                return _response;
+            }
+
+            var tokenHash =
+                _passwordResetTokenService
+                    .HashToken(request.ResetToken);
+
+            await using var transaction =  await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+
+            var resetRequest =
+                await _db.Tbl_PasswordReset
+                    .FirstOrDefaultAsync(x =>
+                        x.ResetTokenHash == tokenHash);
+
+            if (resetRequest == null)
+            {
+                await transaction.RollbackAsync();
+
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired reset token.";
+
+                return _response;
+            }
+
+            await AcquirePasswordResetLockAsync(
+                resetRequest.UserId);
+
+            // Re-read after acquiring the per-user lock.
+            // This guarantees that a concurrent reset operation
+            // cannot consume the token between the initial lookup
+            // and the protected validation.
+            resetRequest =
+                await _db.Tbl_PasswordReset
+                    .FirstOrDefaultAsync(x =>
+                        x.ResetTokenHash == tokenHash);
+
+            if (resetRequest == null ||
+                resetRequest.ConsumedAtUtc != null)
+            {
+                await transaction.RollbackAsync();
+
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired reset token.";
+
+                return _response;
+            }
+
+            if (resetRequest.OtpVerifiedAtUtc == null)
+            {
+                await transaction.RollbackAsync();
+                _response.IsSuccess = false;
+                _response.Message =
+                    "OTP verification is required.";
+
+                return _response;
+            }
+
+            if (resetRequest.ResetTokenExpiresAtUtc == null ||
+                resetRequest.ResetTokenExpiresAtUtc <= DateTime.UtcNow)
+            {
+                await transaction.RollbackAsync();
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Invalid or expired reset token.";
+
+                return _response;
+            }
+
+            var user =
+                await _userManager.FindByIdAsync(
+                    resetRequest.UserId);
+
+            if (user == null)
+            {
+                await transaction.RollbackAsync();
+                _response.IsSuccess = false;
+                _response.Message =
+                    "Password reset could not be completed.";
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Generate ASP.NET Identity password-reset token
+            // ---------------------------------------------------------
+
+            var identityResetToken =
+                await _userManager.GeneratePasswordResetTokenAsync(user);
+
+
+            // ---------------------------------------------------------
+            // Reset Identity password atomically through Identity
+            // ---------------------------------------------------------
+
+            var resetPasswordResult =
+                await _userManager.ResetPasswordAsync(
+                    user,
+                    identityResetToken,
+                    request.NewPassword);
+
+            if (!resetPasswordResult.Succeeded)
+            {
+                await transaction.RollbackAsync();
+                _response.IsSuccess = false;
+
+                _response.Message =
+                    string.Join(
+                        "; ",
+                        resetPasswordResult.Errors
+                            .Select(x => x.Description));
+
+                return _response;
+            }
+
+            // ---------------------------------------------------------
+            // Consume reset token
+            // ---------------------------------------------------------
+
+            resetRequest.ConsumedAtUtc =
+                DateTime.UtcNow;
+
+            resetRequest.ResetIpAddress =
+                request.IpAddress;
+
+            await _db.SaveChangesAsync();
+
+            await transaction.CommitAsync();
+
+            _response.IsSuccess = true;
+            _response.Message =
+                "Password has been reset successfully.";
+
+            _response.Result = null;
+
+            return _response;
+        }
+
         public async Task<ResponseDto> UpdateUserData(string userid, string displayName, string phoneNumber)
         {
             var userToUpdate = await _userManager.FindByIdAsync(userid);
@@ -1205,6 +2126,20 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 _response.Message = "No user found!!!";
             }
             return _response;
+        }
+
+        private async Task AcquirePasswordResetLockAsync(string userId)
+        {
+            var resource =
+                $"PasswordReset:{userId}";
+
+            await _db.Database.ExecuteSqlRawAsync(
+                "EXEC sp_getapplock " +
+                "@Resource={0}, " +
+                "@LockMode='Exclusive', " +
+                "@LockOwner='Transaction', " +
+                "@LockTimeout=5000",
+                resource);
         }
 
         public ResponseDto SaveUserSession(UserLoginSessionsDto userLoginSessionsDto)
@@ -1275,5 +2210,60 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return _response;
         }
 
+        private static readonly string[] AllowedRegistrationRoles =
+        {
+            "ADMIN",
+            "SUBADMIN",
+            "HALLMANAGER",
+            "LOCALUSER",
+            "REMOTEUSER"
+        };
+
+
+
+        private async Task<List<string>> GetAllowedRegistrationRolesAsync()
+        {
+            // 1. Retrieve roles currently stored in the Identity database.
+            var databaseRoles = _roleManager.Roles
+                .Select(role => role.Name!)
+                .ToList();
+
+            // 2. Create any permitted roles missing from the database.
+            foreach (var roleName in AllowedRegistrationRoles)
+            {
+                if (!databaseRoles.Contains(
+                        roleName,
+                        StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!await _roleManager.RoleExistsAsync(roleName))
+                    {
+                        var result = await _roleManager.CreateAsync(
+                            new IdentityRole(roleName));
+
+                        if (!result.Succeeded)
+                        {
+                            var errors = string.Join(
+                                "; ",
+                                result.Errors.Select(error => error.Description));
+
+                            throw new InvalidOperationException(
+                                $"Unable to create role '{roleName}': {errors}");
+                        }
+                    }
+                }
+            }
+
+            // 3. Retrieve the updated database roles.
+            databaseRoles = _roleManager.Roles
+                .Select(role => role.Name!)
+                .ToList();
+
+            // 4. Return only the permitted registration roles.
+            return AllowedRegistrationRoles
+                .Where(allowedRole => databaseRoles.Contains(
+                    allowedRole,
+                    StringComparer.OrdinalIgnoreCase))
+                .ToList();
+        }
     }
 }

@@ -10,7 +10,22 @@ namespace ConferenceBooking.Services.AuthAPI.Service.IService
         Task<ResponseDto> RequestRegistration(RegistrationRequestDto newRequest);
         Task<ResponseDto> ApproveRegistration(ApproveRegistrationDto approveRequest);
         Task<ResponseDto> RejectRegistration(RejectRegistrationDto rejectRequest);
-       
+        Task<ResponseDto> GetPendingRegistrationsAsync();
+        Task<ResponseDto> GetRegistrationLookupsAsync();
+
+        Task<ResponseDto> GetDepartmentsAsync();
+
+        Task<ResponseDto> CreateDepartmentAsync(
+            DepartmentUpsertDto request);
+
+        Task<ResponseDto> UpdateDepartmentAsync(
+            int departmentId,
+            DepartmentUpsertDto request);
+
+        Task<ResponseDto> SetDepartmentStatusAsync(
+            int departmentId,
+            DepartmentStatusDto request);
+
         Task<bool> AssignRole(string username, string roleName);
         Task<bool> RevokeRole(string username, string roleName);
         ResponseDto GetRole(string userid);
@@ -27,5 +42,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service.IService
         ResponseDto GetExpiredUserSession(TimeSpan _timeout);
 
         Task<ResponseDto> CheckRegistrationAsync(RegistrationDuplicateCheckDto newRequest);
+
+        Task<ResponseDto> ForgotPasswordAsync(PasswordResetRequestDto request);
+
+        Task<ResponseDto> VerifyPasswordResetOtpAsync(PasswordResetVerifyOtpDto request);
+
+        Task<ResponseDto> ResetPasswordAsync(PasswordResetCompleteDto request);
     }
 }

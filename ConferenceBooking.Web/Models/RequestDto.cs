@@ -9,5 +9,6 @@ namespace ConferenceBooking.Web.Models
         public object Data { get; set; }
         public string AccessToken { get; set; }
         public IFormFile File { get; set; }
+        public Dictionary<string, string>? Headers { get; set; }
     }
 }

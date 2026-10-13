@@ -1,0 +1,80 @@
+﻿@model List<ConferenceBooking.Web.Models.AuthLogin.PendingRegistrationDto>
+
+@{
+    ViewData["Title"] = "Pending Registrations";
+}
+
+<div class="container-fluid">
+    <div class="row mb-3">
+        <div class="col-12">
+            <h4>Pending Registrations</h4>
+            <p class="text-muted">
+                Review applications before granting access to CONVENE.
+            </p>
+        </div>
+    </div>
+
+    @if (TempData["success"] != null)
+    {
+        <div class="alert alert-success">
+            @TempData["success"]
+        </div>
+    }
+
+    @if (TempData["error"] != null)
+    {
+        <div class="alert alert-danger">
+            @TempData["error"]
+        </div>
+    }
+
+    <div class="card">
+        <div class="card-body">
+            @if (Model == null || !Model.Any())
+            {
+                <div class="alert alert-info mb-0">
+                    There are no pending registration requests.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Designation</th>
+                                <th>Email</th>
+                                <th>Mobile</th>
+                                <th>Submitted (UTC)</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in Model)
+                            {
+                                <tr>
+                                    <td>@item.RequestedDisplayName</td>
+                                    <td>@item.RequestedDesignation</td>
+                                    <td>@item.RequestedEmail</td>
+                                    <td>@item.RequestedMobile</td>
+                                    <td>
+                                        @item.SubmittedAtUtc.ToString("dd-MMM-yyyy HH:mm")
+                                    </td>
+                                    <td>
+                                        <a asp-controller="AdminRegistration"
+                                           asp-action="Review"
+                                           asp-route-id="@item.RegistrationRequestId"
+                                           class="btn btn-primary btn-sm">
+                                            Review
+                                        </a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
