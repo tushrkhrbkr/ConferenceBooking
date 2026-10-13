@@ -32,7 +32,18 @@ namespace ConferenceBooking.Web.Service.IService
         Task<ResponseDto?> GetRegistrationLookups();
         Task<ResponseDto?> ApproveRegistration(ApproveRegistrationDto request);
         Task<ResponseDto?> RejectRegistration(RejectRegistrationDto request);
+        Task<ResponseDto?> GetDepartments();
 
+        Task<ResponseDto?> CreateDepartment(
+            DepartmentManagementDto request);
+
+        Task<ResponseDto?> UpdateDepartment(
+            int departmentId,
+            DepartmentManagementDto request);
+
+        Task<ResponseDto?> SetDepartmentStatus(
+            int departmentId,
+            DepartmentStatusDto request);
 
     }
 }

@@ -253,5 +253,58 @@ namespace ConferenceBooking.Web.Service
             }, withBearer: true);
         }
 
+        public async Task<ResponseDto?> GetDepartments()
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.GET,
+                Url = SD.AuthAPIBase + "/api/auth/departments"
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> CreateDepartment(
+            DepartmentManagementDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.POST,
+                Url = SD.AuthAPIBase + "/api/auth/departments",
+                Data = new
+                {
+                    request.DepartmentCode,
+                    request.DepartmentName
+                }
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> UpdateDepartment(
+            int departmentId,
+            DepartmentManagementDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.PUT,
+                Url = SD.AuthAPIBase + $"/api/auth/departments/{departmentId}",
+                Data = new
+                {
+                    request.DepartmentCode,
+                    request.DepartmentName
+                }
+            }, withBearer: true);
+        }
+
+        public async Task<ResponseDto?> SetDepartmentStatus(
+            int departmentId,
+            DepartmentStatusDto request)
+        {
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.PUT,
+                Url = SD.AuthAPIBase +
+                      $"/api/auth/departments/{departmentId}/status",
+                Data = request
+            }, withBearer: true);
+        }
+
     }
 }

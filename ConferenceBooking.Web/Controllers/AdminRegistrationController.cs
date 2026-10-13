@@ -145,5 +145,96 @@ namespace ConferenceBooking.Web.Controllers
 
             return RedirectToAction(nameof(Index));
         }
+
+        [HttpGet]
+        public async Task<IActionResult> ManageDept()
+        {
+            var response = await _authService.GetDepartments();
+
+            if (response == null || !response.IsSuccess)
+            {
+                TempData["error"] =
+                    response?.Message ?? "Unable to retrieve departments.";
+
+                return View(new List<DepartmentManagementDto>());
+            }
+
+            var departments =
+                JsonConvert.DeserializeObject<List<DepartmentManagementDto>>(
+                    Convert.ToString(response.Result) ?? "[]")
+                ?? new List<DepartmentManagementDto>();
+
+            return View(departments);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CreateDept(DepartmentManagementDto model)
+        {
+            if (!ModelState.IsValid)
+            {
+                TempData["error"] =
+                    "Enter a valid department code and department name.";
+
+                return RedirectToAction(nameof(ManageDept));
+            }
+
+            var response = await _authService.CreateDepartment(model);
+
+            if (response != null && response.IsSuccess)
+                TempData["success"] = "Department created successfully.";
+            else
+                TempData["error"] =
+                    response?.Message ?? "Unable to create department.";
+
+            return RedirectToAction(nameof(ManageDept));
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateDept(DepartmentManagementDto model)
+        {
+            if (!ModelState.IsValid || model.DepartmentId <= 0)
+            {
+                TempData["error"] = "Invalid department details.";
+                return RedirectToAction(nameof(ManageDept));
+            }
+
+            var response = await _authService.UpdateDepartment(
+                model.DepartmentId, model);
+
+            if (response != null && response.IsSuccess)
+                TempData["success"] = "Department updated successfully.";
+            else
+                TempData["error"] =
+                    response?.Message ?? "Unable to update department.";
+
+            return RedirectToAction(nameof(ManageDept));
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ChangeStatusDept(
+            int departmentId,
+            bool isActive)
+        {
+            if (departmentId <= 0)
+            {
+                TempData["error"] = "Invalid department.";
+                return RedirectToAction(nameof(ManageDept));
+            }
+
+            var response = await _authService.SetDepartmentStatus(
+                departmentId,
+                new DepartmentStatusDto { IsActive = isActive });
+
+            if (response != null && response.IsSuccess)
+                TempData["success"] = response.Message;
+            else
+                TempData["error"] =
+                    response?.Message ?? "Unable to change department status.";
+
+            return RedirectToAction(nameof(ManageDept));
+        }
     }
 }

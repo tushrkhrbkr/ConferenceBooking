@@ -1,0 +1,201 @@
+﻿@model List<ConferenceBooking.Web.Models.AuthLogin.DepartmentManagementDto>
+
+@{
+    ViewData["Title"] = "Department Management";
+}
+
+<div class="container-fluid">
+
+    <div class="row mb-3">
+        <div class="col-12">
+            <h4>Department Management</h4>
+            <p class="text-muted">
+                Create and maintain departments used by CONVENE.
+            </p>
+        </div>
+    </div>
+
+    @if (TempData["success"] != null)
+    {
+        <div class="alert alert-success">
+            @TempData["success"]
+        </div>
+    }
+
+    @if (TempData["error"] != null)
+    {
+        <div class="alert alert-danger">
+            @TempData["error"]
+        </div>
+    }
+
+    <div class="card mb-3">
+        <div class="card-header">
+            <h5 class="mb-0">Create Department</h5>
+        </div>
+
+        <div class="card-body">
+            <form asp-action="CreateDept" method="post">
+                @Html.AntiForgeryToken()
+
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label" for="DepartmentCode">
+                            Department Code
+                        </label>
+                        <input class="form-control"
+                               id="DepartmentCode"
+                               name="DepartmentCode"
+                               maxlength="20"
+                               required
+                               placeholder="e.g. IT" />
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label" for="DepartmentName">
+                            Department Name
+                        </label>
+                        <input class="form-control"
+                               id="DepartmentName"
+                               name="DepartmentName"
+                               maxlength="150"
+                               required
+                               placeholder="Enter department name" />
+                    </div>
+
+                    <div class="col-md-3 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="ti ti-plus me-1"></i>
+                            Create Department
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">Departments</h5>
+        </div>
+
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Department Name</th>
+                            <th>Status</th>
+                            <th>Created (UTC)</th>
+                            <th style="min-width: 300px;">Actions</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @if (Model == null || !Model.Any())
+                        {
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">
+                                    No departments found.
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var department in Model)
+                            {
+                                <tr>
+                                    <td>
+                                        <strong>@department.DepartmentCode</strong>
+                                    </td>
+
+                                    <td>@department.DepartmentName</td>
+
+                                    <td>
+                                        @if (department.IsActive)
+                                        {
+                                            <span class="badge bg-success">
+                                                Active
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary">
+                                                Inactive
+                                            </span>
+                                        }
+                                    </td>
+
+                                    <td>
+                                        @department.CreatedAtUtc.ToString("dd-MMM-yyyy")
+                                    </td>
+
+                                    <td>
+                                        <form asp-action="UpdateDept"
+                                              method="post"
+                                              class="d-flex gap-2 flex-wrap mb-2">
+                                            @Html.AntiForgeryToken()
+
+                                            <input type="hidden"
+                                                   name="DepartmentId"
+                                                   value="@department.DepartmentId" />
+
+                                            <input class="form-control form-control-sm"
+                                                   name="DepartmentCode"
+                                                   value="@department.DepartmentCode"
+                                                   maxlength="20"
+                                                   required
+                                                   style="max-width: 100px;" />
+
+                                            <input class="form-control form-control-sm"
+                                                   name="DepartmentName"
+                                                   value="@department.DepartmentName"
+                                                   maxlength="150"
+                                                   required
+                                                   style="max-width: 180px;" />
+
+                                            <button type="submit"
+                                                    class="btn btn-sm btn-outline-primary">
+                                                Save
+                                            </button>
+                                        </form>
+
+                                        <form asp-action="ChangeStatusDept"
+                                              method="post"
+                                              onsubmit="return confirm('Change this department status?');">
+                                            @Html.AntiForgeryToken()
+
+                                            <input type="hidden"
+                                                   name="departmentId"
+                                                   value="@department.DepartmentId" />
+
+                                            <input type="hidden"
+                                                   name="isActive"
+                                                   value="@(!department.IsActive)" />
+
+                                            @if (department.IsActive)
+                                            {
+                                                <button type="submit"
+                                                        class="btn btn-sm btn-outline-danger">
+                                                    Deactivate
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button type="submit"
+                                                        class="btn btn-sm btn-outline-success">
+                                                    Activate
+                                                </button>
+                                            }
+                                        </form>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1161,42 +1161,73 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 };
             }
         }
-
         public async Task<ResponseDto> GetRegistrationLookupsAsync()
         {
             try
             {
-                // Department options come from Tbl_Department.
-                var departments = await _db.Tbl_Department
-                    .AsNoTracking()
-                    .Where(d => d.IsActive)
-                    .OrderBy(d => d.DepartmentName)
-                    .Select(d => new DepartmentOptionDto
-                    {
-                        DepartmentId = d.DepartmentId,
-                        DepartmentName = d.DepartmentName
-                    })
+                // 1. Read existing Identity roles from the database.
+                var existingRoles = await _roleManager.Roles
                     .ToListAsync();
 
-                // Keep this list aligned with the role allow-list
-                // enforced by ApproveRegistration().
-                var allowedRoleNames = new[]
+                // 2. Create permitted roles that are missing.
+                foreach (var roleName in AllowedRegistrationRoles)
                 {
-            "ADMIN",
-            "SUBADMIN",
-            "HALLMANAGER",
-            "LOCALUSER",
-            "REMOTEUSER"
-        };
+                    var exists = existingRoles.Any(role =>
+                        string.Equals(
+                            role.Name,
+                            roleName,
+                            StringComparison.OrdinalIgnoreCase));
 
-                // Role options come from the Identity AspNetRoles table.
-                var roles = await GetAllowedRegistrationRolesAsync();
-                var roleOptions = roles
-    .Select(roleName => new RoleOptionDto
-    {
-        RoleName = roleName
-    })
-    .ToList();
+                    if (exists)
+                        continue;
+
+                    var createResult = await _roleManager.CreateAsync(
+                        new IdentityRole(roleName));
+
+                    if (!createResult.Succeeded)
+                    {
+                        // Account for a concurrent request creating the role.
+                        if (!await _roleManager.RoleExistsAsync(roleName))
+                        {
+                            throw new InvalidOperationException(
+                                $"Could not create role '{roleName}': " +
+                                string.Join(
+                                    "; ",
+                                    createResult.Errors.Select(
+                                        error => error.Description)));
+                        }
+                    }
+                }
+
+                // 3. Retrieve roles again after synchronization.
+                existingRoles = await _roleManager.Roles.ToListAsync();
+
+                // 4. Return only permitted roles.
+                var roleOptions = AllowedRegistrationRoles
+                    .Where(allowedName => existingRoles.Any(role =>
+                        string.Equals(
+                            role.Name,
+                            allowedName,
+                            StringComparison.OrdinalIgnoreCase)))
+                    .Select(roleName => new RoleOptionDto
+                    {
+                        RoleName = roleName,
+                        DisplayName = roleName
+                    })
+                    .ToList();
+
+                // 5. Return active departments.
+                var departments = await _db.Tbl_Department
+                    .AsNoTracking()
+                    .Where(department => department.IsActive)
+                    .OrderBy(department => department.DepartmentName)
+                    .Select(department => new DepartmentOptionDto
+                    {
+                        DepartmentId = department.DepartmentId,
+                        DepartmentCode = department.DepartmentCode,
+                        DepartmentName = department.DepartmentName
+                    })
+                    .ToListAsync();
 
                 return new ResponseDto
                 {
@@ -1209,8 +1240,12 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     }
                 };
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogError(
+                    ex,
+                    "Failed to retrieve registration lookup data.");
+
                 return new ResponseDto
                 {
                     IsSuccess = false,
@@ -1218,6 +1253,258 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 };
             }
         }
+
+        public async Task<ResponseDto> GetDepartmentsAsync()
+        {
+            var response = new ResponseDto();
+
+            try
+            {
+                var departments = await _db.Tbl_Department
+                    .AsNoTracking()
+                    .OrderBy(d => d.DepartmentName)
+                    .Select(d => new DepartmentDto
+                    {
+                        DepartmentId = d.DepartmentId,
+                        DepartmentCode = d.DepartmentCode,
+                        DepartmentName = d.DepartmentName,
+                        IsActive = d.IsActive,
+                        CreatedAtUtc = d.CreatedAtUtc,
+                        UpdatedAtUtc = d.UpdatedAtUtc
+                    })
+                    .ToListAsync();
+
+                response.IsSuccess = true;
+                response.Result = departments;
+                response.Message = "Departments retrieved successfully.";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to retrieve departments.");
+                response.IsSuccess = false;
+                response.Message = "Unable to retrieve departments.";
+            }
+
+            return response;
+        }
+
+        public async Task<ResponseDto> CreateDepartmentAsync(
+    DepartmentUpsertDto request)
+        {
+            var response = new ResponseDto();
+
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.DepartmentCode) ||
+                string.IsNullOrWhiteSpace(request.DepartmentName))
+            {
+                response.IsSuccess = false;
+                response.Message = "Department code and name are required.";
+                return response;
+            }
+
+            var code = request.DepartmentCode.Trim().ToUpperInvariant();
+            var name = request.DepartmentName.Trim();
+
+            try
+            {
+                var exists = await _db.Tbl_Department.AnyAsync(d =>
+                    d.DepartmentCode.ToUpper() == code);
+
+                if (exists)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "This department code already exists.";
+                    return response;
+                }
+
+                var department = new Department
+                {
+                    DepartmentCode = code,
+                    DepartmentName = name,
+                    IsActive = true,
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+
+                await _db.Tbl_Department.AddAsync(department);
+                await _db.SaveChangesAsync();
+
+                response.IsSuccess = true;
+                response.Message = "Department created successfully.";
+                response.Result = new DepartmentDto
+                {
+                    DepartmentId = department.DepartmentId,
+                    DepartmentCode = department.DepartmentCode,
+                    DepartmentName = department.DepartmentName,
+                    IsActive = department.IsActive,
+                    CreatedAtUtc = department.CreatedAtUtc,
+                    UpdatedAtUtc = department.UpdatedAtUtc
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create department.");
+                response.IsSuccess = false;
+                response.Message = "Unable to create department.";
+            }
+
+            return response;
+        }
+
+        public async Task<ResponseDto> UpdateDepartmentAsync(
+    int departmentId,
+    DepartmentUpsertDto request)
+        {
+            var response = new ResponseDto();
+
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.DepartmentCode) ||
+                string.IsNullOrWhiteSpace(request.DepartmentName))
+            {
+                response.IsSuccess = false;
+                response.Message = "Department code and name are required.";
+                return response;
+            }
+
+            var code = request.DepartmentCode.Trim().ToUpperInvariant();
+            var name = request.DepartmentName.Trim();
+
+            try
+            {
+                var department = await _db.Tbl_Department
+                    .FirstOrDefaultAsync(d => d.DepartmentId == departmentId);
+
+                if (department == null)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Department not found.";
+                    return response;
+                }
+
+                var duplicateCode = await _db.Tbl_Department.AnyAsync(d =>
+                    d.DepartmentId != departmentId &&
+                    d.DepartmentCode.ToUpper() == code);
+
+                if (duplicateCode)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "This department code already exists.";
+                    return response;
+                }
+
+                department.DepartmentCode = code;
+                department.DepartmentName = name;
+                department.UpdatedAtUtc = DateTime.UtcNow;
+
+                await _db.SaveChangesAsync();
+
+                response.IsSuccess = true;
+                response.Message = "Department updated successfully.";
+                response.Result = new DepartmentDto
+                {
+                    DepartmentId = department.DepartmentId,
+                    DepartmentCode = department.DepartmentCode,
+                    DepartmentName = department.DepartmentName,
+                    IsActive = department.IsActive,
+                    CreatedAtUtc = department.CreatedAtUtc,
+                    UpdatedAtUtc = department.UpdatedAtUtc
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to update department {DepartmentId}.",
+                    departmentId);
+
+                response.IsSuccess = false;
+                response.Message = "Unable to update department.";
+            }
+
+            return response;
+        }
+
+        public async Task<ResponseDto> SetDepartmentStatusAsync(
+    int departmentId,
+    DepartmentStatusDto request)
+        {
+            var response = new ResponseDto();
+
+            try
+            {
+                var department = await _db.Tbl_Department
+                    .FirstOrDefaultAsync(d => d.DepartmentId == departmentId);
+
+                if (department == null)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Department not found.";
+                    return response;
+                }
+
+                if (!request.IsActive && department.IsActive)
+                {
+                    var hasActiveUsers = await _db.Tbl_UserProfile
+                        .AnyAsync(p =>
+                            p.DepartmentId == departmentId &&
+                            p.IsActive);
+
+                    if (hasActiveUsers)
+                    {
+                        response.IsSuccess = false;
+                        response.Message =
+                            "This department has active users. Reassign those users before deactivating it.";
+                        return response;
+                    }
+
+                    var hasPendingRegistrations =
+                        await _db.Tbl_RegistrationRequest.AnyAsync(r =>
+                            r.RequestedDepartmentId == departmentId &&
+                            r.RequestStatus ==
+                                Enums.RegistrationRequestStatus.Pending);
+
+                    if (hasPendingRegistrations)
+                    {
+                        response.IsSuccess = false;
+                        response.Message =
+                            "This department has pending registration requests. Resolve those requests before deactivating it.";
+                        return response;
+                    }
+                }
+
+                department.IsActive = request.IsActive;
+                department.UpdatedAtUtc = DateTime.UtcNow;
+
+                await _db.SaveChangesAsync();
+
+                response.IsSuccess = true;
+                response.Message = request.IsActive
+                    ? "Department activated successfully."
+                    : "Department deactivated successfully.";
+
+                response.Result = new DepartmentDto
+                {
+                    DepartmentId = department.DepartmentId,
+                    DepartmentCode = department.DepartmentCode,
+                    DepartmentName = department.DepartmentName,
+                    IsActive = department.IsActive,
+                    CreatedAtUtc = department.CreatedAtUtc,
+                    UpdatedAtUtc = department.UpdatedAtUtc
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to change department status for {DepartmentId}.",
+                    departmentId);
+
+                response.IsSuccess = false;
+                response.Message = "Unable to change department status.";
+            }
+
+            return response;
+        }
+
 
         public async Task<bool> AssignRole(string username, string roleName)
         {
@@ -1931,6 +2218,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             "LOCALUSER",
             "REMOTEUSER"
         };
+
+
 
         private async Task<List<string>> GetAllowedRegistrationRolesAsync()
         {

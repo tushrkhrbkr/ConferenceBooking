@@ -301,5 +301,59 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             }
         }
 
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpGet("departments")]
+        public async Task<IActionResult> GetDepartments()
+        {
+            var response = await _authService.GetDepartmentsAsync();
+
+            if (!response.IsSuccess)
+                return StatusCode(500, response);
+
+            return Ok(response);
+        }
+
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpPost("departments")]
+        public async Task<IActionResult> CreateDepartment(
+            [FromBody] DepartmentUpsertDto request)
+        {
+            var response = await _authService.CreateDepartmentAsync(request);
+
+            if (!response.IsSuccess)
+                return BadRequest(response);
+
+            return Ok(response);
+        }
+
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpPut("departments/{id:int}")]
+        public async Task<IActionResult> UpdateDepartment(
+            int id,
+            [FromBody] DepartmentUpsertDto request)
+        {
+            var response = await _authService.UpdateDepartmentAsync(id, request);
+
+            if (!response.IsSuccess)
+                return BadRequest(response);
+
+            return Ok(response);
+        }
+
+        [Authorize(Roles = "Admin,ADMIN")]
+        [HttpPut("departments/{id:int}/status")]
+        public async Task<IActionResult> SetDepartmentStatus(
+            int id,
+            [FromBody] DepartmentStatusDto request)
+        {
+            var response =
+                await _authService.SetDepartmentStatusAsync(id, request);
+
+            if (!response.IsSuccess)
+                return BadRequest(response);
+
+            return Ok(response);
+        }
+
     }
 }
