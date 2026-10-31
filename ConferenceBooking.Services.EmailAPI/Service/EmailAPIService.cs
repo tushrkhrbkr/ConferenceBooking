@@ -69,12 +69,19 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             message.To.Add(
                 new MailAddress(request.ToEmail));
 
-            // Alternate plain-text representation.
+            // Explicit plain-text MIME part.
             message.AlternateViews.Add(
                 AlternateView.CreateAlternateViewFromString(
                     plainTextBody,
-                    null,
+                    System.Text.Encoding.UTF8,
                     "text/plain"));
+
+            // Explicit HTML MIME part.
+            message.AlternateViews.Add(
+                AlternateView.CreateAlternateViewFromString(
+                    htmlBody,
+                    System.Text.Encoding.UTF8,
+                    "text/html"));
 
             using var smtpClient = new SmtpClient(
                 _emailSettings.SmtpHost,

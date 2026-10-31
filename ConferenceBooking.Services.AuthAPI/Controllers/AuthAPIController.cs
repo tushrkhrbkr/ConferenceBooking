@@ -99,8 +99,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
 
         [AllowAnonymous]
         [HttpPost("login")]
-        public async Task<IActionResult> Login(
-    [FromBody] LoginRequestDto model)
+        public async Task<IActionResult> Login([FromBody] LoginRequestDto model)
         {
             var loginResponse = await _authService.Login(model);
 
@@ -168,7 +167,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
-        [Authorize]
+        [AllowAnonymous]
         [HttpGet("GetUserRole/{Uid}")]
         public IActionResult GetUserRole(string Uid)
         {
@@ -346,8 +345,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             int id,
             [FromBody] DepartmentStatusDto request)
         {
-            var response =
-                await _authService.SetDepartmentStatusAsync(id, request);
+            var response = await _authService.SetDepartmentStatusAsync(id, request);
 
             if (!response.IsSuccess)
                 return BadRequest(response);

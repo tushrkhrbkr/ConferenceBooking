@@ -1288,8 +1288,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return response;
         }
 
-        public async Task<ResponseDto> CreateDepartmentAsync(
-    DepartmentUpsertDto request)
+        public async Task<ResponseDto> CreateDepartmentAsync(DepartmentUpsertDto request)
         {
             var response = new ResponseDto();
 
@@ -1350,9 +1349,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return response;
         }
 
-        public async Task<ResponseDto> UpdateDepartmentAsync(
-    int departmentId,
-    DepartmentUpsertDto request)
+        public async Task<ResponseDto> UpdateDepartmentAsync(int departmentId, DepartmentUpsertDto request)
         {
             var response = new ResponseDto();
 
@@ -1423,9 +1420,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return response;
         }
 
-        public async Task<ResponseDto> SetDepartmentStatusAsync(
-    int departmentId,
-    DepartmentStatusDto request)
+        public async Task<ResponseDto> SetDepartmentStatusAsync(int departmentId, DepartmentStatusDto request)
         {
             var response = new ResponseDto();
 
@@ -1474,7 +1469,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 department.IsActive = request.IsActive;
                 department.UpdatedAtUtc = DateTime.UtcNow;
 
-                await _db.SaveChangesAsync();
+                var result = await _db.SaveChangesAsync();
 
                 response.IsSuccess = true;
                 response.Message = request.IsActive
@@ -1504,7 +1499,6 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
             return response;
         }
-
 
         public async Task<bool> AssignRole(string username, string roleName)
         {
@@ -2218,8 +2212,6 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             "LOCALUSER",
             "REMOTEUSER"
         };
-
-
 
         private async Task<List<string>> GetAllowedRegistrationRolesAsync()
         {
