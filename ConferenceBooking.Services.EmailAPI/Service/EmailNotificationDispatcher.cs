@@ -91,6 +91,7 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             {
                 "PasswordResetOtp" => "PASSWORD_RESET_OTP",
 
+                "RegistrationRequested" => "REGISTRATION_REQUESTED",
                 _ => throw new NotSupportedException(
                     $"Unsupported email event type: {eventType}")
             };
@@ -122,6 +123,30 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                         replacements["Otp"] = payload.Otp;
                         replacements["ValidityMinutes"] = payload.ValidityMinutes.ToString();
                         replacements["UserName"] = payload.UserName ?? "User";
+
+                        break;
+                    }
+
+                case "RegistrationRequested":
+                    {
+                        var payload =
+                            JsonSerializer.Deserialize<RegistrationRequestedEmailDto>(
+                                notification.PayloadJson,
+                                JsonOptions);
+
+                        if (payload == null ||
+                            string.IsNullOrWhiteSpace(payload.UserName) ||
+                            string.IsNullOrWhiteSpace(payload.ApplicationReference) ||
+                            string.IsNullOrWhiteSpace(payload.SubmittedOn))
+                        {
+                            throw new InvalidOperationException(
+                                "Invalid registration requested email payload.");
+                        }
+
+                        replacements["UserName"] = payload.UserName;
+                        replacements["ApplicationReference"] =
+                            payload.ApplicationReference;
+                        replacements["SubmittedOn"] = payload.SubmittedOn;
 
                         break;
                     }

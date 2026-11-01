@@ -427,13 +427,37 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     .AddAsync(registrationRequest);
 
                 // ---------------------------------------------------------
-                // 8. SAVE EVERYTHING
+                // 8. SAVE REGISTRATION DATA
                 // ---------------------------------------------------------
+
                 await _db.SaveChangesAsync();
 
                 // ---------------------------------------------------------
-                // 9. COMMIT
+                // 9. QUEUE REGISTRATION REQUEST EMAIL
                 // ---------------------------------------------------------
+
+                var emailPayload = new RegistrationRequestedEmailPayloadDto
+                {
+                    UserName = registrationRequest.RequestedDisplayName,
+
+                    ApplicationReference =
+                        registrationRequest.RegistrationRequestId.ToString(),
+
+                    SubmittedOn =
+                        registrationRequest.SubmittedAtUtc.ToString(
+                            "dd MMM yyyy HH:mm 'UTC'",
+                            System.Globalization.CultureInfo.InvariantCulture)
+                };
+
+                await _emailNotificationService.EnqueueAsync(
+                    eventType: "RegistrationRequested",
+                    toEmail: registrationRequest.RequestedEmail,
+                    payload: emailPayload);
+
+                // ---------------------------------------------------------
+                // 10. COMMIT REGISTRATION + EMAIL OUTBOX
+                // ---------------------------------------------------------
+
                 await transaction.CommitAsync();
 
                 _response.IsSuccess = true;
