@@ -7,7 +7,12 @@
     Layout = null;
     ViewData["Title"] = "Verify OTP";
 }
-
+@if (TempData["success"] != null)
+{
+    <div class="alert alert-success" role="alert">
+        @TempData["success"]
+    </div>
+}
 <!DOCTYPE html>
 <html lang="en">
 <head>

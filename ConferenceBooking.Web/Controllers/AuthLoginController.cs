@@ -29,62 +29,86 @@ namespace MUS.Webapp.Controllers
             _tokenProvider = tokenProvider;
             _captchaService = captchaService;
         }
-        
+
         [HttpGet]
         public IActionResult Login()
-        {            
-            return View();
+        {
+            return View(new LoginRequestDto());
         }
-        
+
 
         [HttpPost]
-        public async Task<IActionResult> Login(LoginRequestDto obj)
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Login(LoginRequestDto obj, string captcha)
         {
+            // CAPTCHA must be validated before calling AuthAPI.
+            if (!_captchaService.ValidateCaptcha(captcha))
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Invalid or expired CAPTCHA. Please try again.");
+
+                return View(obj);
+            }
+
+            if (!ModelState.IsValid)
+                return View(obj);
 
             ResponseDto responseDto = await _authService.Login(obj);
 
             if (responseDto != null && responseDto.IsSuccess)
             {
                 LoginResponseDto loginResponseDto = JsonConvert.DeserializeObject<LoginResponseDto>(Convert.ToString(responseDto.Result));
+
                 var userid = loginResponseDto.User.ID;
                 var sessionId = Guid.NewGuid();
+
                 HttpContext.Session.SetString("UserID", userid);
                 HttpContext.Session.SetString("SessionId", sessionId.ToString());
+
                 ResponseDto userRoleResponseDto = await _authService.GetUserRole(userid);
 
                 List<string> roleList = new();
-                if (userRoleResponseDto != null && userRoleResponseDto.IsSuccess)
+
+                if (userRoleResponseDto != null &&
+                    userRoleResponseDto.IsSuccess)
                 {
-                    HttpContext.Session.SetString("userRole", userRoleResponseDto.Result.ToString());
-                    roleList = JsonConvert.DeserializeObject<List<string>>(Convert.ToString(userRoleResponseDto.Result));
+                    HttpContext.Session.SetString(
+                        "userRole",
+                        userRoleResponseDto.Result.ToString());
+
+                    roleList =
+                        JsonConvert.DeserializeObject<List<string>>(
+                            Convert.ToString(userRoleResponseDto.Result));
                 }
 
                 await SignInUser(loginResponseDto, roleList);
+
                 _tokenProvider.SetToken(loginResponseDto.Token);
 
-                UserLoginSessionsDto userLoginSessionsDto = new UserLoginSessionsDto();
-                userLoginSessionsDto.SessionID = sessionId;
-                userLoginSessionsDto.UserId = userid;
-                userLoginSessionsDto.LoginEndpoint = "U&P";
-                userLoginSessionsDto.LoginTime = DateTime.Now;
-                userLoginSessionsDto.LastActivity = DateTime.Now;
+                UserLoginSessionsDto userLoginSessionsDto =
+                    new UserLoginSessionsDto
+                    {
+                        SessionID = sessionId,
+                        UserId = userid,
+                        LoginEndpoint = "U&P",
+                        LoginTime = DateTime.Now,
+                        LastActivity = DateTime.Now
+                    };
 
                 await _authService.SaveUserSession(userLoginSessionsDto);
+
                 TempData["success"] = "Login successful";
+
                 return RedirectToAction("Index", "Home");
             }
-            else
-            {
-                ModelState.AddModelError(
-                    "CustomError",
-                    responseDto?.Message
-                        ?? "Unable to sign in. Please try again.");
 
-                return View(obj);
-            }
+            ModelState.AddModelError(
+                string.Empty,
+                responseDto?.Message ?? "Unable to sign in. Please try again.");
 
+            return View(obj);
         }
-        
         public async Task<IActionResult> Logout()
         {
             var sessionIdStr = HttpContext.Session.GetString("SessionId");
@@ -175,8 +199,21 @@ namespace MUS.Webapp.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ForgotPassword(string email)
+        public async Task<IActionResult> ForgotPassword(
+     string email,
+     string captcha)
         {
+            // Validate CAPTCHA first.
+            if (!_captchaService.ValidateCaptcha(captcha))
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Invalid or expired CAPTCHA. Please try again.");
+
+                ViewBag.Email = email;
+                return View();
+            }
+
             if (string.IsNullOrWhiteSpace(email))
             {
                 ModelState.AddModelError(
@@ -208,7 +245,6 @@ namespace MUS.Webapp.Controllers
                 return View();
             }
 
-            // Extract structured status returned by AuthAPI.
             string status = string.Empty;
 
             if (response.Result != null)
@@ -226,26 +262,11 @@ namespace MUS.Webapp.Controllers
                 }
             }
 
-            if (!response.IsSuccess)
-            {
-                ViewBag.Status = status;
-
-                // Display the actual message supplied by AuthAPI.
-                ModelState.AddModelError(
-                    string.Empty,
-                    response.Message ??
-                    "Unable to process your request.");
-
-                ViewBag.Email = email;
-                return View();
-            }
-
-            if (status != "OTP_QUEUED")
+            if (!response.IsSuccess || status != "OTP_QUEUED")
             {
                 ModelState.AddModelError(
                     string.Empty,
-                    response.Message ??
-                    "Unable to initiate password reset.");
+                    response.Message ?? "Unable to process your request.");
 
                 ViewBag.Email = email;
                 return View();
@@ -253,7 +274,8 @@ namespace MUS.Webapp.Controllers
 
             TempData["PasswordResetEmail"] = email;
 
-            TempData["success"] = response.Message;
+            TempData["success"] =
+                "Email sent successfully. Please check your inbox.";
 
             return RedirectToAction(nameof(VerifyOtp));
         }

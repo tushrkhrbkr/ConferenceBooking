@@ -53,6 +53,7 @@
                             Or Login With Username
                         </p> *@
                         <form method="post" class="text-start mb-3">
+                            @Html.AntiForgeryToken()
                             <div class="mb-3">
                             <div asp-validation-summary="ModelOnly"
                                  class="text-danger mb-3">
@@ -80,6 +81,40 @@
                                     Please enter Password.
                                 </div>
                             </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Security Verification</label>
+
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <img id="captchaImage"
+                                     src="@Url.Action("CaptchaImage", "AuthLogin")"
+                                     alt="CAPTCHA"
+                                     width="220"
+                                     height="65"
+                                     class="border rounded" />
+
+                                <button type="button"
+                                        class="btn btn-light border"
+                                        onclick="refreshCaptcha()"
+                                        title="Refresh CAPTCHA">
+                                    <i class="ti ti-refresh"></i>
+                                </button>
+                            </div>
+
+                            <input type="text"
+                                   name="captcha"
+                                   id="captcha"
+                                   class="form-control"
+                                   placeholder="Enter the characters shown above"
+                                   autocomplete="off"
+                                   maxlength="6"
+                                   required />
+
+                            <small class="text-muted">
+                                Enter the six characters displayed in the image.
+                            </small>
+                        </div>
+
                            <div class="d-flex justify-content-between mb-3">
                                 <div class="form-check">
                                     <input class="form-check-input" id="checkbox-signin" type="checkbox" />
@@ -132,5 +167,16 @@
         <!-- SweetAlert JavaScript -->
         <script src="~/lib/toastr/toastr.min.js"></script>
         <script src="~/vendor/sweetalert2/sweetalert2.min.js"></script>
+        <script>
+            function refreshCaptcha() {
+                const image = document.getElementById("captchaImage");
+
+                image.src =
+                    '@Url.Action("CaptchaImage", "AuthLogin")'
+                    + '?t=' + new Date().getTime();
+
+                document.getElementById("captcha").value = "";
+            }
+        </script>
     </body>
 </html>
