@@ -385,16 +385,33 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             }
         }
 
-        private static TimeSpan GetRetryDelay(int attempt)
+        private TimeSpan GetRetryDelay(int attempt)
         {
-            return attempt switch
-            {
-                1 => TimeSpan.FromMinutes(1),
-                2 => TimeSpan.FromMinutes(5),
-                3 => TimeSpan.FromMinutes(15),
-                4 => TimeSpan.FromMinutes(30),
-                _ => TimeSpan.FromHours(1)
-            };
+            var initialDelaySeconds = Math.Max(
+                1,
+                _options.InitialRetryDelaySeconds);
+
+            var maximumDelayMinutes = Math.Max(
+                1,
+                _options.MaximumRetryDelayMinutes);
+
+            // Exponential backoff:
+            // Attempt 1 = Initial delay
+            // Attempt 2 = 2 x Initial delay
+            // Attempt 3 = 4 x Initial delay
+            // Attempt 4 = 8 x Initial delay
+
+            var multiplier = Math.Pow(2, Math.Max(0, attempt - 1));
+
+            var delaySeconds = initialDelaySeconds * multiplier;
+
+            var maximumDelaySeconds = maximumDelayMinutes * 60.0;
+
+            delaySeconds = Math.Min(
+                delaySeconds,
+                maximumDelaySeconds);
+
+            return TimeSpan.FromSeconds(delaySeconds);
         }
 
         private async Task ReleaseOwnedNotificationsAsync()
