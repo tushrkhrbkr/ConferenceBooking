@@ -218,12 +218,23 @@ namespace ConferenceBooking.Services.EmailAPI.Service
 
             try
             {
-                await smtpClient.SendMailAsync(message);
+                await smtpClient.SendMailAsync(
+                    message,
+                    cancellationToken);
 
                 _logger.LogInformation(
                     "Email notification {NotificationId} delivered. EventType: {EventType}",
                     notification.EmailNotificationOutboxId,
                     notification.EventType);
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation(
+                    "Email notification {NotificationId} delivery was cancelled during shutdown.",
+                    notification.EmailNotificationOutboxId);
+
+                throw;
             }
             catch (Exception ex)
             {
