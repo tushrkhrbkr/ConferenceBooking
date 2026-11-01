@@ -1,15 +1,16 @@
 ﻿namespace ConferenceBooking.Services.EmailAPI.Models
+{
+    public class EmailNotificationWorkerOptions
     {
-        public class EmailNotificationWorkerOptions
-        {
-            public int PollingIntervalSeconds { get; set; } = 10;
+        public int PollingIntervalSeconds { get; set; } = 10;
 
-            public int BatchSize { get; set; } = 20;
+        public int BatchSize { get; set; } = 20;
 
-            public int ProcessingLeaseMinutes { get; set; } = 10;
+        public int ProcessingLeaseMinutes { get; set; } = 10;
 
-            public int InitialRetryDelaySeconds { get; set; } = 60;
+        public int InitialRetryDelaySeconds { get; set; } = 60;
 
-            public int MaximumRetryDelayMinutes { get; set; } = 60;
-        }
+        public int MaximumRetryDelayMinutes { get; set; } = 60;
+        public int LeaseRenewalIntervalSeconds { get; set; } = 60;
     }
+}

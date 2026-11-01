@@ -246,19 +246,48 @@ namespace ConferenceBooking.Services.EmailAPI.Service
 
             try
             {
-                // The dispatcher will be implemented in the next step.
-                using var scope = _scopeFactory.CreateScope();
+                using var dispatchCts =
+     CancellationTokenSource.CreateLinkedTokenSource(
+         cancellationToken);
 
-                var dispatcher = scope.ServiceProvider
-                    .GetRequiredService<IEmailNotificationDispatcher>();
-
-                await dispatcher.DispatchAsync(
-                    notification,
-                    cancellationToken);
-
-                await MarkAsSentAsync(
+                var leaseTask = MaintainLeaseAsync(
                     notificationId,
-                    cancellationToken);
+                    dispatchCts);
+
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+
+                    var dispatcher = scope.ServiceProvider
+                        .GetRequiredService<IEmailNotificationDispatcher>();
+
+                    await dispatcher.DispatchAsync(
+                        notification,
+                        dispatchCts.Token);
+
+                    dispatchCts.Cancel();
+
+                    await leaseTask;
+
+                    await MarkAsSentAsync(
+                        notificationId,
+                        cancellationToken);
+                }
+                catch
+                {
+                    dispatchCts.Cancel();
+
+                    try
+                    {
+                        await leaseTask;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Expected when stopping lease renewal.
+                    }
+
+                    throw;
+                }
             }
             catch (OperationCanceledException)
                 when (cancellationToken.IsCancellationRequested)
@@ -479,6 +508,75 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                     ex,
                     "Could not release processing notifications during worker shutdown. WorkerId={WorkerId}",
                     _workerId);
+            }
+        }
+
+        private async Task RenewLeaseAsync(
+    long notificationId,
+    CancellationToken cancellationToken)
+        {
+            using var scope = _scopeFactory.CreateScope();
+
+            var db = scope.ServiceProvider
+                .GetRequiredService<ApplicationDbContext>();
+
+            var nowUtc = DateTime.UtcNow;
+
+            var affectedRows =
+                await db.Database.ExecuteSqlInterpolatedAsync($@"
+            UPDATE dbo.Tbl_EmailNotificationOutbox
+            SET
+                LockedAtUtc = {nowUtc},
+                UpdatedAtUtc = {nowUtc}
+            WHERE
+                EmailNotificationOutboxId = {notificationId}
+                AND Status = {(byte)EmailNotificationStatus.Processing}
+                AND LockedBy = {_workerId};",
+                    cancellationToken);
+
+            if (affectedRows == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Worker no longer owns notification {notificationId}.");
+            }
+        }
+
+        private async Task MaintainLeaseAsync(
+    long notificationId,
+    CancellationTokenSource dispatchCts)
+        {
+            var intervalSeconds = Math.Max(
+                5,
+                _options.LeaseRenewalIntervalSeconds);
+
+            try
+            {
+                while (!dispatchCts.IsCancellationRequested)
+                {
+                    await Task.Delay(
+                        TimeSpan.FromSeconds(intervalSeconds),
+                        dispatchCts.Token);
+
+                    await RenewLeaseAsync(
+                        notificationId,
+                        dispatchCts.Token);
+                }
+            }
+            catch (OperationCanceledException)
+                when (dispatchCts.IsCancellationRequested)
+            {
+                // Normal completion or application shutdown.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Lease renewal failed for notification {NotificationId}.",
+                    notificationId);
+
+                dispatchCts.Cancel();
+
+                throw;
             }
         }
     }
