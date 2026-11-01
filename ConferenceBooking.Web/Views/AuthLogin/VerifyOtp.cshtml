@@ -36,7 +36,11 @@
                 <p class="text-muted">
                     Enter the six-digit OTP sent to your registered email address.
                 </p>
-
+                <div class="alert alert-info text-start">
+                    <i class="ti ti-mail me-1"></i>
+                    An OTP has been requested for your registered email address.
+                    It is valid for 5 minutes.
+                </div>
                 <form asp-action="VerifyOtp"
                       method="post"
                       class="text-start">
@@ -44,7 +48,7 @@
                     @Html.AntiForgeryToken()
 
                     <div asp-validation-summary="ModelOnly"
-                         class="text-danger mb-3"></div>
+                         class="alert alert-danger text-start mb-3"></div>
 
                     <input type="hidden"
                            name="email"

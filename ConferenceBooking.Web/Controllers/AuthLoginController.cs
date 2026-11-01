@@ -1,17 +1,18 @@
-﻿using Microsoft.AspNetCore.Authentication.Cookies;
+﻿using ConferenceBooking.Web.Models;
+using ConferenceBooking.Web.Models.AuthLogin;
+using ConferenceBooking.Web.Service.IService;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
-using ConferenceBooking.Web.Service.IService;
-using System.Security.Claims;
-using ConferenceBooking.Web.Models;
-using System.IdentityModel.Tokens.Jwt;
-using System.DirectoryServices;
-using System.Security.Principal;
-using Microsoft.AspNetCore.HttpOverrides;
+using Newtonsoft.Json.Linq;
 using System;
-using ConferenceBooking.Web.Models.AuthLogin;
-using Microsoft.AspNetCore.Http;
+using System.DirectoryServices;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Principal;
 
 namespace MUS.Webapp.Controllers
 {
@@ -176,35 +177,80 @@ namespace MUS.Webapp.Controllers
             if (string.IsNullOrWhiteSpace(email))
             {
                 ModelState.AddModelError(
-                    "email",
+                    string.Empty,
                     "Please enter your registered email address.");
 
                 return View();
             }
 
+            email = email.Trim();
+
             var request = new PasswordResetInternalRequestDto
             {
-                Email = email.Trim(),
+                Email = email,
                 IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString()
                             ?? string.Empty
             };
 
             var response = await _authService.ForgotPassword(request);
 
-            if (response == null || !response.IsSuccess)
+            if (response == null)
             {
                 ModelState.AddModelError(
                     string.Empty,
-                    "Unable to process your request. Please try again.");
+                    "The password reset service is currently unavailable. " +
+                    "Please try again later or contact the CONVENE Administrator.");
 
+                ViewBag.Email = email;
                 return View();
             }
 
-            // Do not disclose whether the email address exists.
-            TempData["PasswordResetEmail"] = email.Trim();
+            // Extract structured status returned by AuthAPI.
+            string status = string.Empty;
 
-            TempData["success"] =
-                "If an account exists for this email address, an OTP has been sent.";
+            if (response.Result != null)
+            {
+                try
+                {
+                    var resultJson = JObject.Parse(
+                        JsonConvert.SerializeObject(response.Result));
+
+                    status = resultJson["status"]?.ToString() ?? string.Empty;
+                }
+                catch
+                {
+                    status = string.Empty;
+                }
+            }
+
+            if (!response.IsSuccess)
+            {
+                ViewBag.Status = status;
+
+                // Display the actual message supplied by AuthAPI.
+                ModelState.AddModelError(
+                    string.Empty,
+                    response.Message ??
+                    "Unable to process your request.");
+
+                ViewBag.Email = email;
+                return View();
+            }
+
+            if (status != "OTP_QUEUED")
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    response.Message ??
+                    "Unable to initiate password reset.");
+
+                ViewBag.Email = email;
+                return View();
+            }
+
+            TempData["PasswordResetEmail"] = email;
+
+            TempData["success"] = response.Message;
 
             return RedirectToAction(nameof(VerifyOtp));
         }
@@ -224,9 +270,7 @@ namespace MUS.Webapp.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> VerifyOtp(
-            string email,
-            string otp)
+        public async Task<IActionResult> VerifyOtp(string email, string otp)
         {
             if (string.IsNullOrWhiteSpace(email) ||
                 string.IsNullOrWhiteSpace(otp))
@@ -300,9 +344,16 @@ namespace MUS.Webapp.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ResetPassword(
-            PasswordResetCompleteDto model)
+        public async Task<IActionResult> ResetPassword(PasswordResetCompleteDto model)
         {
+            if (string.IsNullOrWhiteSpace(model.ResetToken))
+            {
+                TempData["error"] =
+                    "Your password reset session is invalid. Please request a new OTP.";
+
+                return RedirectToAction(nameof(ForgotPassword));
+            }
+
             if (!ModelState.IsValid)
                 return View(model);
 
