@@ -74,7 +74,7 @@ namespace ConferenceBooking.Services.EmailAPI.Service
         }
 
         private async Task RecoverStaleNotificationsAsync(
-            CancellationToken cancellationToken)
+     CancellationToken cancellationToken)
         {
             using var scope = _scopeFactory.CreateScope();
 
@@ -84,27 +84,48 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             var staleBeforeUtc = DateTime.UtcNow.AddMinutes(
                 -Math.Max(1, _options.ProcessingLeaseMinutes));
 
+            var failedStatus = (byte)EmailNotificationStatus.Failed;
+            var deadLetterStatus = (byte)EmailNotificationStatus.DeadLetter;
+            var processingStatus = (byte)EmailNotificationStatus.Processing;
+
             var recoveredCount =
                 await db.Database.ExecuteSqlInterpolatedAsync($@"
-                    UPDATE dbo.Tbl_EmailNotificationOutbox
-                    SET
-                        Status = {(byte)EmailNotificationStatus.Failed},
-                        NextAttemptAtUtc = SYSUTCDATETIME(),
-                        LockedBy = NULL,
-                        LockedAtUtc = NULL,
-                        UpdatedAtUtc = SYSUTCDATETIME(),
-                        LastError = 'Processing lease expired; returned to retry queue.'
-                    WHERE
-                        Status = {(byte)EmailNotificationStatus.Processing}
-                        AND LockedAtUtc IS NOT NULL
-                        AND LockedAtUtc < {staleBeforeUtc};",
+            UPDATE dbo.Tbl_EmailNotificationOutbox
+            SET
+                Status = CASE
+                    WHEN AttemptCount >= MaxAttempts
+                        THEN {deadLetterStatus}
+                    ELSE {failedStatus}
+                END,
+
+                NextAttemptAtUtc = CASE
+                    WHEN AttemptCount >= MaxAttempts
+                        THEN NULL
+                    ELSE SYSUTCDATETIME()
+                END,
+
+                LockedBy = NULL,
+                LockedAtUtc = NULL,
+                UpdatedAtUtc = SYSUTCDATETIME(),
+
+                LastError = CASE
+                    WHEN AttemptCount >= MaxAttempts
+                        THEN 'Processing lease expired; maximum attempts exhausted.'
+                    ELSE 'Processing lease expired; returned to retry queue.'
+                END
+
+            WHERE
+                Status = {processingStatus}
+                AND LockedAtUtc IS NOT NULL
+                AND LockedAtUtc < {staleBeforeUtc};",
                     cancellationToken);
 
             if (recoveredCount > 0)
             {
                 _logger.LogWarning(
-                    "Recovered {Count} stale email notifications.",
-                    recoveredCount);
+                    "Recovered {Count} stale email notifications. WorkerId={WorkerId}",
+                    recoveredCount,
+                    _workerId);
             }
         }
 
