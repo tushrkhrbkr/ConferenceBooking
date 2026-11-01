@@ -1,0 +1,111 @@
+﻿@*
+    For more information on enabling MVC for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
+*@
+@{
+}
+@{
+    Layout = null;
+    ViewData["Title"] = "Verify OTP";
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Verify OTP | CONVENE</title>
+
+    <link href="~/assets/vendor.min.css" rel="stylesheet" />
+    <link href="~/assets/app.min.css" rel="stylesheet" />
+    <link href="~/assets/icons.min.css" rel="stylesheet" />
+</head>
+
+<body>
+    <div class="auth-bg d-flex min-vh-100 justify-content-center align-items-center">
+        <div class="col-xl-4 col-lg-5 col-md-6 m-3">
+            <div class="card text-center p-4">
+
+                <a asp-controller="AuthLogin" asp-action="Login"
+                   class="auth-brand mb-3">
+                    <img src="~/images/ConveneDarkLogoIndia.png"
+                         height="90" alt="CONVENE" />
+                </a>
+
+                <h3 class="fw-semibold mb-2">Verify OTP</h3>
+
+                <p class="text-muted">
+                    Enter the six-digit OTP sent to your registered email address.
+                </p>
+                <div class="alert alert-info text-start">
+                    <i class="ti ti-mail me-1"></i>
+                    An OTP has been requested for your registered email address.
+                    It is valid for 5 minutes.
+                </div>
+                @if (TempData["success"] != null)
+                {
+                    <div class="alert alert-success" role="alert">
+                        @TempData["success"]
+                    </div>
+                }
+                <form asp-action="VerifyOtp"
+                      method="post"
+                      class="text-start">
+
+                    @Html.AntiForgeryToken()
+
+                    <div asp-validation-summary="ModelOnly"
+                         class="alert alert-danger text-start mb-3"></div>
+
+                    <input type="hidden"
+                           name="email"
+                           value="@ViewBag.Email" />
+
+                    <div class="mb-3">
+                        <label class="form-label">Email Address</label>
+
+                        <input type="email"
+                               class="form-control"
+                               value="@ViewBag.Email"
+                               readonly />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="otp">
+                            One-Time Password
+                        </label>
+
+                        <input type="text"
+                               id="otp"
+                               name="otp"
+                               class="form-control text-center"
+                               placeholder="Enter 6-digit OTP"
+                               maxlength="6"
+                               minlength="6"
+                               pattern="[0-9]{6}"
+                               inputmode="numeric"
+                               autocomplete="one-time-code"
+                               required />
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            Verify OTP
+                        </button>
+                    </div>
+                </form>
+
+                <div class="mt-3">
+                    <a asp-action="ForgotPassword">
+                        Request a new OTP
+                    </a>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="~/assets/vendor.min.js"></script>
+    <script src="~/assets/app.js"></script>
+    <partial name="_ValidationScriptsPartial" />
+</body>
+</html>

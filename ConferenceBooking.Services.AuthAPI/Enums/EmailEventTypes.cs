@@ -3,14 +3,12 @@
     public static class EmailEventTypes
     {
         // Authentication
-        public const string PasswordResetOtp =
-            "PasswordResetOtp";
-
-        public const string RegistrationApproved =
-            "RegistrationApproved";
-
-        public const string RegistrationRejected =
-            "RegistrationRejected";
+        public const string PasswordResetOtp = "PasswordResetOtp";
+        public const string RegistrationRequested = "RegistrationRequested";
+        public const string RegistrationApproved = "RegistrationApproved";
+        public const string RegistrationRejected = "RegistrationRejected";
+        public const string PasswordResetSuccess = "PasswordResetSuccess";
+        public const string PasswordChanged = "PasswordChanged";
 
 
         // Booking

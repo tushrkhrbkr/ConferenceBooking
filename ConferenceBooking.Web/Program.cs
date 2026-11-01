@@ -18,7 +18,7 @@ SD.AuthAPIBase = builder.Configuration["ServiceUrls:AuthAPI"];
 builder.Services.AddScoped<IBaseService, BaseService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenProvider, TokenProvider>();
-
+builder.Services.AddScoped<ICaptchaService, CaptchaService>();
 
 builder.Services.AddAuthentication(options =>
 {
@@ -38,11 +38,12 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddSession(options =>
 {
-    //options.IdleTimeout = TimeSpan.FromMinutes(20);
-    options.IdleTimeout = TimeSpan.MaxValue;
+    options.IdleTimeout = TimeSpan.FromMinutes(20);
+    options.Cookie.Name = ".CONVENE.Session";
     options.Cookie.HttpOnly = true;
     options.Cookie.IsEssential = true;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SameSite = SameSiteMode.Lax;
 });
 var app = builder.Build();
 
@@ -58,10 +59,10 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 
 app.UseRouting();
-
+app.UseSession();
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseSession();
+
 app.UseMiddleware<SessionTrackingMiddleware>(builder.Configuration.GetValue<int>("TimeOut:Minutes"));
 
 app.MapControllerRoute(

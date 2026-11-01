@@ -24,6 +24,11 @@ builder.Services.AddSingleton(mapper);
 builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IEmailAPIService, EmailAPIService>();
+builder.Services.AddScoped<IEmailNotificationDispatcher, EmailNotificationDispatcher>();
+builder.Services.Configure<EmailNotificationWorkerOptions>(
+    builder.Configuration.GetSection("EmailNotificationWorker"));
+
+builder.Services.AddHostedService<EmailNotificationWorker>();
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();

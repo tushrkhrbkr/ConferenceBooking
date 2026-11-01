@@ -1,11 +1,14 @@
 using AutoMapper;
 using ConferenceBooking.Services.AuthAPI;
 using ConferenceBooking.Services.AuthAPI.Data;
+using ConferenceBooking.Services.AuthAPI.Extensions;
 using ConferenceBooking.Services.AuthAPI.Models;
 using ConferenceBooking.Services.AuthAPI.Service;
 using ConferenceBooking.Services.AuthAPI.Service.IService;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.OpenApi.Models;
 using System;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,7 +16,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddDbContext<ApplicationDbContext>(Options => Options.UseSqlServer(
 builder.Configuration.GetConnectionString("DefaultConnection")));
-builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("ApiSettings:JwtOptions"));
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("ApiSettings1:JwtOptions"));
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 {
     options.User.RequireUniqueEmail = true;
@@ -36,20 +39,6 @@ builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 builder.Services.AddScoped<IOtpService, OtpService>();
 builder.Services.AddScoped<IPasswordResetTokenService, PasswordResetTokenService>();
 builder.Services.AddScoped<IEmailNotificationService, EmailNotificationService>();
-builder.Services.Configure<EmailNotificationDispatcherOptions>(
-    builder.Configuration.GetSection("EmailNotificationDispatcher"));
-
-builder.Services.AddHttpClient<
-    IEmailNotificationDispatcher,
-    EmailNotificationDispatcher>(client =>
-    {
-        client.Timeout = TimeSpan.FromSeconds(60);
-    });
-
-builder.Services.Configure<EmailNotificationWorkerOptions>(
-    builder.Configuration.GetSection("EmailNotificationWorker"));
-
-builder.Services.AddHostedService<EmailNotificationWorker>();
 
 builder.Services.AddHostedService<SessionTimeoutService>();
 builder.Services.AddControllers();
@@ -58,7 +47,31 @@ builder.Services.AddSingleton(mapper);
 builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(option =>
+{
+    option.AddSecurityDefinition(name: JwtBearerDefaults.AuthenticationScheme, securityScheme: new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Description = "Enter the Bearer Authorization string as following: `Bearer Generated-JWT-Token`",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
+    });
+    option.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference=new OpenApiReference
+                {
+                    Type=ReferenceType.SecurityScheme,
+                    Id=JwtBearerDefaults.AuthenticationScheme
+                }
+            }, new string[]{}
+        }
+    });
+});
+builder.AddAppAuthentication();
 
 var app = builder.Build();
 

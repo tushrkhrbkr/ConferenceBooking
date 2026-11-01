@@ -10,7 +10,9 @@ namespace ConferenceBooking.Services.EmailAPI
         {
             var mappingConfig = new MapperConfiguration(config =>
             {
-
+                config.CreateMap<EmailTemplate, EmailTemplateDto>().ReverseMap();
+                config.CreateMap<EmailTemplateAudit, EmailTemplateAuditDto>().ReverseMap();
+                config.CreateMap<EmailNotificationOutbox, EmailNotificationOutboxDto>().ReverseMap();
             });
             return mappingConfig;
         }

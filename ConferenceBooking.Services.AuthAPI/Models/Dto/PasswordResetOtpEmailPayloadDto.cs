@@ -5,5 +5,6 @@
         public string Otp { get; set; } = string.Empty;
 
         public int ValidityMinutes { get; set; }
+        public string UserName { get; set; } = string.Empty;    
     }
 }
