@@ -1,5 +1,6 @@
 ﻿using ConferenceBooking.Web.Models;
 using ConferenceBooking.Web.Models.AuthLogin;
+using ConferenceBooking.Web.Service;
 using ConferenceBooking.Web.Service.IService;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -20,11 +21,13 @@ namespace MUS.Webapp.Controllers
     {
         private readonly IAuthService _authService;
         private readonly ITokenProvider _tokenProvider;
+        private readonly ICaptchaService _captchaService;
 
-        public AuthLoginController(IAuthService authService, ITokenProvider tokenProvider)
+        public AuthLoginController(IAuthService authService, ITokenProvider tokenProvider, ICaptchaService captchaService)
         {
             _authService = authService;
             _tokenProvider = tokenProvider;
+            _captchaService = captchaService;
         }
         
         [HttpGet]
@@ -466,6 +469,18 @@ namespace MUS.Webapp.Controllers
             return View(model);
         }
 
+        [HttpGet]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+        public IActionResult CaptchaImage()
+        {
+            var image = _captchaService.GenerateCaptchaImage();
 
+            Response.Headers["Cache-Control"] =
+                "no-store, no-cache, must-revalidate";
+
+            Response.Headers["Pragma"] = "no-cache";
+
+            return File(image, "image/svg+xml");
+        }
     }
 }
