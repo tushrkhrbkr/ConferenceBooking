@@ -1587,187 +1587,414 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return _response;
         }
 
-        public async Task<ResponseDto> ForgotPasswordAsync(PasswordResetRequestDto request)
-        {
-            const string genericMessage =
-                "If an account exists for this email address, " +
-                "an OTP has been sent.";
 
-            // Always return a generic response to prevent account enumeration.
+        public async Task<ResponseDto> ForgotPasswordAsync(
+            PasswordResetRequestDto request)
+        {
+            _response.Result = null;
+
+            // ---------------------------------------------------------
+            // 1. Validate request
+            // ---------------------------------------------------------
+
             if (request == null ||
                 string.IsNullOrWhiteSpace(request.Email))
             {
-                _response.IsSuccess = true;
-                _response.Message = genericMessage;
-                _response.Result = null;
+                _response.IsSuccess = false;
+                _response.Message = "Please enter your registered email address.";
+
+                _response.Result = new
+                {
+                    Status = PasswordResetStatus.InvalidRequest
+                };
 
                 return _response;
             }
 
             var email = request.Email.Trim().ToLowerInvariant();
-            var atIndex = email.IndexOf('@');
 
-            if (atIndex <= 0 || atIndex == email.Length - 1)
+            if (email.Length > 256 ||
+                !new System.ComponentModel.DataAnnotations.EmailAddressAttribute()
+                    .IsValid(email))
             {
-                _response.IsSuccess = true;
-                _response.Message = genericMessage;
-                _response.Result = null;
+                _response.IsSuccess = false;
+                _response.Message = "Please enter a valid email address.";
+
+                _response.Result = new
+                {
+                    Status = PasswordResetStatus.InvalidRequest
+                };
 
                 return _response;
             }
-
-            // Find the Identity user.
-            var user = await _userManager.FindByEmailAsync(email);
-
-            if (user == null)
-            {
-                _response.IsSuccess = true;
-                _response.Message = genericMessage;
-                _response.Result = null;
-
-                return _response;
-            }
-
-            // Serialize concurrent OTP requests for the same user.
-            await using var transaction =
-                await _db.Database.BeginTransactionAsync(
-                    System.Data.IsolationLevel.Serializable);
 
             try
             {
-                await AcquirePasswordResetLockAsync(user.Id);
+                // ---------------------------------------------------------
+                // 2. Find Identity user
+                // ---------------------------------------------------------
 
-                // Confirm that the application profile exists and is active.
-                var profile = await _db.Tbl_UserProfile
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(x =>
-                        x.UserId == user.Id &&
-                        x.EmailAddress == email);
+                var user = await _userManager.FindByEmailAsync(email);
 
-                if (profile == null || !profile.IsActive)
+                if (user == null)
                 {
-                    await transaction.RollbackAsync();
+                    // Check whether registration is still pending.
+                    var pendingRegistration =
+                        await _db.Tbl_RegistrationRequest
+                            .AsNoTracking()
+                            .Where(x =>
+                                x.RequestedEmail.ToLower() == email &&
+                                x.RequestStatus ==
+                                    RegistrationRequestStatus.Pending)
+                            .OrderByDescending(x => x.SubmittedAtUtc)
+                            .FirstOrDefaultAsync();
 
-                    _response.IsSuccess = true;
-                    _response.Message = genericMessage;
-                    _response.Result = null;
+                    if (pendingRegistration != null)
+                    {
+                        _response.IsSuccess = false;
+                        _response.Message =
+                            "Your CONVENE registration is pending approval. " +
+                            "Please contact the CONVENE Administrator for assistance.";
+
+                        _response.Result = new
+                        {
+                            Status = PasswordResetStatus.RegistrationPending
+                        };
+
+                        return _response;
+                    }
+
+                    _response.IsSuccess = false;
+                    _response.Message =
+                        "We could not find an account associated with this email address. " +
+                        "Please verify your email address or contact the CONVENE Administrator.";
+
+                    _response.Result = new
+                    {
+                        Status = PasswordResetStatus.UserNotFound
+                    };
 
                     return _response;
                 }
 
-                var nowUtc = DateTime.UtcNow;
+                // ---------------------------------------------------------
+                // 3. Check Identity account lockout
+                // ---------------------------------------------------------
 
-                // Rate limit: maximum five requests in the previous hour.
-                var oneHourAgoUtc = nowUtc.AddHours(-1);
-
-                var otpRequestCount = await _db.Tbl_PasswordReset
-                    .AsNoTracking()
-                    .CountAsync(x =>
-                        x.UserId == user.Id &&
-                        x.CreatedAtUtc >= oneHourAgoUtc);
-
-                if (otpRequestCount >= 5)
+                if (user.LockoutEnabled &&
+                    user.LockoutEnd.HasValue &&
+                    user.LockoutEnd.Value > DateTimeOffset.UtcNow)
                 {
-                    await transaction.RollbackAsync();
+                    _response.IsSuccess = false;
+                    _response.Message =
+                        "Your CONVENE account is currently locked. " +
+                        "Please contact the CONVENE Administrator.";
 
-                    _response.IsSuccess = true;
-                    _response.Message = genericMessage;
-                    _response.Result = null;
+                    _response.Result = new
+                    {
+                        Status = PasswordResetStatus.AccountLocked
+                    };
 
                     return _response;
                 }
 
-                // Resend cooldown: at least 60 seconds between requests.
-                var cooldownFromUtc = nowUtc.AddSeconds(-60);
+                // ---------------------------------------------------------
+                // 4. Serialize concurrent requests for this user
+                // ---------------------------------------------------------
 
-                var recentRequest = await _db.Tbl_PasswordReset
-                    .AsNoTracking()
-                    .Where(x =>
-                        x.UserId == user.Id &&
-                        x.CreatedAtUtc >= cooldownFromUtc)
-                    .OrderByDescending(x => x.CreatedAtUtc)
-                    .FirstOrDefaultAsync();
+                await using var transaction =
+                    await _db.Database.BeginTransactionAsync(
+                        System.Data.IsolationLevel.Serializable);
 
-                if (recentRequest != null)
-                {
-                    await transaction.RollbackAsync();
-
-                    _response.IsSuccess = true;
-                    _response.Message = genericMessage;
-                    _response.Result = null;
-
-                    return _response;
-                }
-
-                // Generate the OTP and store only its hash in PasswordReset.
-                var otp = _otpService.GenerateOtp();
-                var otpHash = _otpService.HashOtp(otp);
-
-                const int otpValidityMinutes = 5;
-
-                var passwordReset = new PasswordReset
-                {
-                    UserId = user.Id,
-                    EmailAddress = email,
-                    OtpHash = otpHash,
-                    OtpExpiresAtUtc =
-                        nowUtc.AddMinutes(otpValidityMinutes),
-                    OtpAttemptCount = 0,
-                    OtpMaxAttempts = 5,
-                    CreatedAtUtc = nowUtc,
-                    RequestedIpAddress = request.IpAddress
-                };
-
-                await _db.Tbl_PasswordReset.AddAsync(passwordReset);
-
-                // Queue the email in the SAME DbContext and transaction.
-                // The OTP is included only in the protected outbox payload.
-                var emailPayload = new PasswordResetOtpEmailPayloadDto
-                {
-                    Otp = otp,
-                    ValidityMinutes = otpValidityMinutes
-                };
-
-                await _emailNotificationService.EnqueueAsync(
-                    eventType: EmailEventTypes.PasswordResetOtp,
-                    toEmail: email,
-                    payload: emailPayload,
-                    subject: "CONVENE - Password Reset OTP");
-
-                // EnqueueAsync calls SaveChangesAsync using this DbContext.
-                // Both PasswordReset and EmailNotificationOutbox are still
-                // inside this transaction until CommitAsync succeeds.
-                await transaction.CommitAsync();
-
-                _response.IsSuccess = true;
-                _response.Message = genericMessage;
-                _response.Result = null;
-
-                return _response;
-            }
-            catch
-            {
-                // If the reset record or outbox insert fails, do not commit
-                // either operation.
                 try
                 {
-                    await transaction.RollbackAsync();
+                    await AcquirePasswordResetLockAsync(user.Id);
+
+                    // ---------------------------------------------------------
+                    // 5. Check application profile
+                    // ---------------------------------------------------------
+
+                    var profile = await _db.Tbl_UserProfile
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(x =>
+                            x.UserId == user.Id &&
+                            x.EmailAddress == email);
+
+                    if (profile == null)
+                    {
+                        await transaction.RollbackAsync();
+
+                        _response.IsSuccess = false;
+                        _response.Message =
+                            "Your CONVENE user profile could not be located. " +
+                            "Please contact the CONVENE Administrator.";
+
+                        _response.Result = new
+                        {
+                            Status = PasswordResetStatus.UserInactive
+                        };
+
+                        return _response;
+                    }
+
+                    if (!profile.IsActive)
+                    {
+                        await transaction.RollbackAsync();
+
+                        _response.IsSuccess = false;
+                        _response.Message =
+                            "Your CONVENE account is currently inactive. " +
+                            "Please contact the CONVENE Administrator.";
+
+                        _response.Result = new
+                        {
+                            Status = PasswordResetStatus.UserInactive
+                        };
+
+                        return _response;
+                    }
+
+                    // ---------------------------------------------------------
+                    // 6. Check department status
+                    // ---------------------------------------------------------
+
+                    if (!profile.DepartmentId.HasValue)
+                    {
+                        await transaction.RollbackAsync();
+
+                        _response.IsSuccess = false;
+                        _response.Message =
+                            "Your account is not associated with an active department. " +
+                            "Please contact the CONVENE Administrator.";
+
+                        _response.Result = new
+                        {
+                            Status = PasswordResetStatus.DepartmentInactive
+                        };
+
+                        return _response;
+                    }
+
+                    var department = await _db.Tbl_Department
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(x =>
+                            x.DepartmentId == profile.DepartmentId.Value);
+
+                    if (department == null || !department.IsActive)
+                    {
+                        await transaction.RollbackAsync();
+
+                        _response.IsSuccess = false;
+                        _response.Message =
+                            "Your department is currently inactive. " +
+                            "Please contact the CONVENE Administrator.";
+
+                        _response.Result = new
+                        {
+                            Status = PasswordResetStatus.DepartmentInactive
+                        };
+
+                        return _response;
+                    }
+
+                    // ---------------------------------------------------------
+                    // 7. Check OTP request limits
+                    // ---------------------------------------------------------
+
+                    var nowUtc = DateTime.UtcNow;
+
+                    // Maximum five requests in the previous hour.
+                    var oneHourAgoUtc = nowUtc.AddHours(-1);
+
+                    var otpRequestCount =
+                        await _db.Tbl_PasswordReset
+                            .AsNoTracking()
+                            .CountAsync(x =>
+                                x.UserId == user.Id &&
+                                x.CreatedAtUtc >= oneHourAgoUtc);
+
+                    if (otpRequestCount >= 5)
+                    {
+                        await transaction.RollbackAsync();
+
+                        _response.IsSuccess = false;
+                        _response.Message =
+                            "You have reached the password reset request limit. " +
+                            "Please try again later or contact the CONVENE Administrator.";
+
+                        _response.Result = new
+                        {
+                            Status = PasswordResetStatus.RateLimitExceeded,
+                            RetryAfterMinutes = 60
+                        };
+
+                        return _response;
+                    }
+
+                    // Minimum 60 seconds between OTP requests.
+                    var cooldownFromUtc = nowUtc.AddSeconds(-60);
+
+                    var recentRequest =
+                        await _db.Tbl_PasswordReset
+                            .AsNoTracking()
+                            .Where(x =>
+                                x.UserId == user.Id &&
+                                x.CreatedAtUtc >= cooldownFromUtc)
+                            .OrderByDescending(x => x.CreatedAtUtc)
+                            .FirstOrDefaultAsync();
+
+                    if (recentRequest != null)
+                    {
+                        await transaction.RollbackAsync();
+
+                        var retryAfterSeconds = Math.Max(
+                            1,
+                            (int)Math.Ceiling(
+                                60 - (nowUtc - recentRequest.CreatedAtUtc)
+                                    .TotalSeconds));
+
+                        _response.IsSuccess = false;
+                        _response.Message =
+                            $"An OTP was recently requested. " +
+                            $"Please wait {retryAfterSeconds} seconds before trying again.";
+
+                        _response.Result = new
+                        {
+                            Status = PasswordResetStatus.OtpCooldown,
+                            RetryAfterSeconds = retryAfterSeconds
+                        };
+
+                        return _response;
+                    }
+
+                    // ---------------------------------------------------------
+                    // 8. Generate OTP
+                    // ---------------------------------------------------------
+
+                    var otp = _otpService.GenerateOtp();
+
+                    var otpHash = _otpService.HashOtp(otp);
+
+                    const int otpValidityMinutes = 5;
+
+                    var passwordReset = new PasswordReset
+                    {
+                        UserId = user.Id,
+
+                        EmailAddress = email,
+
+                        OtpHash = otpHash,
+
+                        OtpExpiresAtUtc =
+                            nowUtc.AddMinutes(otpValidityMinutes),
+
+                        OtpAttemptCount = 0,
+
+                        OtpMaxAttempts = 5,
+
+                        CreatedAtUtc = nowUtc,
+
+                        RequestedIpAddress = request.IpAddress
+                    };
+
+                    await _db.Tbl_PasswordReset.AddAsync(passwordReset);
+
+                    // ---------------------------------------------------------
+                    // 9. Queue OTP email
+                    // ---------------------------------------------------------
+
+                    var emailPayload =
+                        new PasswordResetOtpEmailPayloadDto
+                        {
+                            Otp = otp,
+                            ValidityMinutes = otpValidityMinutes
+                        };
+
+                    var outbox = await _emailNotificationService.EnqueueAsync(
+                        eventType: EmailEventTypes.PasswordResetOtp,
+                        toEmail: email,
+                        payload: emailPayload,
+                        subject: "CONVENE - Password Reset OTP");
+
+                    // ---------------------------------------------------------
+                    // 10. Commit OTP and email queue atomically
+                    // ---------------------------------------------------------
+
+                    await transaction.CommitAsync();
+
+                    _response.IsSuccess = true;
+
+                    _response.Message =
+                        "Your password reset OTP has been queued for email delivery. " +
+                        "It is valid for 5 minutes. Please check your inbox.";
+
+                    _response.Result = new
+                    {
+                        Status = PasswordResetStatus.OtpQueued,
+                        ExpiresInMinutes = otpValidityMinutes
+                    };
+
+                    _logger.LogInformation(
+                        "Password reset OTP queued. " +
+                        "UserId={UserId}, OutboxId={OutboxId}",
+                        user.Id,
+                        outbox.EmailNotificationOutboxId);
+
+                    return _response;
                 }
                 catch (Exception ex)
                 {
+                    try
+                    {
+                        await transaction.RollbackAsync();
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        _logger.LogError(
+                            rollbackException,
+                            "Password reset transaction rollback failed.");
+                    }
+
                     _logger.LogError(
                         ex,
-                        "Failed to roll back the password-reset transaction.");
-                }
+                        "Unable to queue password reset OTP for user {UserId}.",
+                        user.Id);
 
-                // Do not return exception details, OTP, or payload to WebApp.
-                _response.IsSuccess = true;
-                _response.Message = genericMessage;
-                _response.Result = null;
+                    _response.IsSuccess = false;
+
+                    _response.Message =
+                        "We could not process your password reset request at this time. " +
+                        "Please try again later or contact the CONVENE Administrator.";
+
+                    _response.Result = new
+                    {
+                        Status = PasswordResetStatus.EmailQueueFailed
+                    };
+
+                    return _response;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Unexpected error in ForgotPasswordAsync.");
+
+                _response.IsSuccess = false;
+
+                _response.Message =
+                    "An unexpected error occurred while processing your request. " +
+                    "Please try again later or contact the CONVENE Administrator.";
+
+                _response.Result = new
+                {
+                    Status = PasswordResetStatus.EmailQueueFailed
+                };
 
                 return _response;
             }
         }
+
 
         public async Task<ResponseDto> VerifyPasswordResetOtpAsync(PasswordResetVerifyOtpDto request)
         {

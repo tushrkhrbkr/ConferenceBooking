@@ -164,24 +164,167 @@ namespace MUS.Webapp.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> ForgotPassword()
+        public IActionResult ForgotPassword()
         {
             return View();
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> ForgotPassword(string email)
         {
-            var clientIpAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                ModelState.AddModelError(
+                    "email",
+                    "Please enter your registered email address.");
+
+                return View();
+            }
 
             var request = new PasswordResetInternalRequestDto
             {
-                Email = email,
-                IpAddress = clientIpAddress
+                Email = email.Trim(),
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString()
+                            ?? string.Empty
             };
 
-            ResponseDto resetRequestDto = await _authService.ForgotPassword(request);
+            var response = await _authService.ForgotPassword(request);
+
+            if (response == null || !response.IsSuccess)
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Unable to process your request. Please try again.");
+
+                return View();
+            }
+
+            // Do not disclose whether the email address exists.
+            TempData["PasswordResetEmail"] = email.Trim();
+
+            TempData["success"] =
+                "If an account exists for this email address, an OTP has been sent.";
+
+            return RedirectToAction(nameof(VerifyOtp));
+        }
+
+        [HttpGet]
+        public IActionResult VerifyOtp()
+        {
+            var email = TempData.Peek("PasswordResetEmail")?.ToString();
+
+            if (string.IsNullOrWhiteSpace(email))
+                return RedirectToAction(nameof(ForgotPassword));
+
+            ViewBag.Email = email;
+
             return View();
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> VerifyOtp(
+            string email,
+            string otp)
+        {
+            if (string.IsNullOrWhiteSpace(email) ||
+                string.IsNullOrWhiteSpace(otp))
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Email and OTP are required.");
+
+                ViewBag.Email = email;
+                return View();
+            }
+
+            var request = new PasswordResetInternalVerifyOtpdto
+            {
+                Email = email.Trim(),
+                Otp = otp.Trim(),
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString()
+                            ?? string.Empty
+            };
+
+            var response =
+                await _authService.VerifyPasswordResetOtp(request);
+
+            if (response == null || !response.IsSuccess)
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    response?.Message ?? "OTP verification failed.");
+
+                ViewBag.Email = email;
+                return View();
+            }
+
+            var tokenResponse =
+                JsonConvert.DeserializeObject<PasswordResetTokenResponseDto>(
+                    Convert.ToString(response.Result) ?? string.Empty);
+
+            if (tokenResponse == null ||
+                string.IsNullOrWhiteSpace(tokenResponse.ResetToken))
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Unable to continue password reset. Please request a new OTP.");
+
+                ViewBag.Email = email;
+                return View();
+            }
+
+            TempData["PasswordResetEmail"] = email.Trim();
+
+            // The token is carried to the reset form, not exposed in the URL.
+            TempData["PasswordResetToken"] = tokenResponse.ResetToken;
+
+            return RedirectToAction(nameof(ResetPassword));
+        }
+
+        [HttpGet]
+        public IActionResult ResetPassword()
+        {
+            var resetToken =
+                TempData["PasswordResetToken"]?.ToString();
+
+            if (string.IsNullOrWhiteSpace(resetToken))
+                return RedirectToAction(nameof(ForgotPassword));
+
+            return View(new PasswordResetCompleteDto
+            {
+                ResetToken = resetToken
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ResetPassword(
+            PasswordResetCompleteDto model)
+        {
+            if (!ModelState.IsValid)
+                return View(model);
+
+            model.IpAddress =
+                HttpContext.Connection.RemoteIpAddress?.ToString()
+                ?? string.Empty;
+
+            var response = await _authService.ResetPassword(model);
+
+            if (response != null && response.IsSuccess)
+            {
+                TempData["success"] =
+                    "Your password has been reset successfully. Please log in.";
+
+                return RedirectToAction(nameof(Login));
+            }
+
+            ModelState.AddModelError(
+                string.Empty,
+                response?.Message ?? "Unable to reset password.");
+
+            return View(model);
         }
 
 
