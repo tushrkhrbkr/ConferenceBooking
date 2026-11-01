@@ -73,8 +73,7 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                 _workerId);
         }
 
-        private async Task RecoverStaleNotificationsAsync(
-     CancellationToken cancellationToken)
+        private async Task RecoverStaleNotificationsAsync(CancellationToken cancellationToken)
         {
             using var scope = _scopeFactory.CreateScope();
 
@@ -193,13 +192,24 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             }
 
             // Send outside the claim transaction.
-            foreach (var notificationId in notificationIds)
+            // Send outside the claim transaction.
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var notificationId in notificationIds)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                await ProcessSingleNotificationAsync(
-                    notificationId,
-                    cancellationToken);
+                    await ProcessSingleNotificationAsync(
+                        notificationId,
+                        cancellationToken);
+                }
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                await ReleaseOwnedNotificationsAsync();
+
+                throw;
             }
         }
 
@@ -385,6 +395,74 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                 4 => TimeSpan.FromMinutes(30),
                 _ => TimeSpan.FromHours(1)
             };
+        }
+
+        private async Task ReleaseOwnedNotificationsAsync()
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+
+                var db = scope.ServiceProvider
+                    .GetRequiredService<ApplicationDbContext>();
+
+                var processingStatus =
+                    (byte)EmailNotificationStatus.Processing;
+
+                var failedStatus =
+                    (byte)EmailNotificationStatus.Failed;
+
+                var deadLetterStatus =
+                    (byte)EmailNotificationStatus.DeadLetter;
+
+                var releasedCount =
+                    await db.Database.ExecuteSqlInterpolatedAsync($@"
+                UPDATE dbo.Tbl_EmailNotificationOutbox
+                SET
+                    Status = CASE
+                        WHEN AttemptCount >= MaxAttempts
+                            THEN {deadLetterStatus}
+                        ELSE {failedStatus}
+                    END,
+
+                    NextAttemptAtUtc = CASE
+                        WHEN AttemptCount >= MaxAttempts
+                            THEN NULL
+                        ELSE SYSUTCDATETIME()
+                    END,
+
+                    LockedBy = NULL,
+                    LockedAtUtc = NULL,
+                    UpdatedAtUtc = SYSUTCDATETIME(),
+
+                    LastError = CASE
+                        WHEN AttemptCount >= MaxAttempts
+                            THEN 'Worker stopped; maximum attempts exhausted.'
+                        ELSE 'Worker stopped; notification returned to retry queue.'
+                    END
+
+                WHERE
+                    Status = {processingStatus}
+                    AND LockedBy = {_workerId};",
+                        CancellationToken.None);
+
+                if (releasedCount > 0)
+                {
+                    _logger.LogWarning(
+                        "Released {Count} processing notifications during worker shutdown. WorkerId={WorkerId}",
+                        releasedCount,
+                        _workerId);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Do not hide the original cancellation.
+                // Lease recovery will handle records if this cleanup fails.
+                _logger.LogError(
+                    ex,
+                    "Could not release processing notifications during worker shutdown. WorkerId={WorkerId}",
+                    _workerId);
+            }
         }
     }
 }
