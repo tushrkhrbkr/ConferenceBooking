@@ -1,4 +1,5 @@
 ﻿using ConferenceBooking.Web.Service.IService;
+using Microsoft.AspNetCore.Http;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -8,69 +9,112 @@ namespace ConferenceBooking.Web.Service
     {
         private readonly IHttpContextAccessor _httpContextAccessor;
 
-        private const string CaptchaSessionKey = "CONVENE_CAPTCHA";
-        private const string CaptchaExpiryKey = "CONVENE_CAPTCHA_EXPIRY";
+        private const string KeyPrefix = "CONVENE_CAPTCHA_";
+        private const string Characters =
+            "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-        private const string Characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        private const int ExpiryMinutes = 3;
+        private const int MaxChallenges = 5;
 
         public CaptchaService(IHttpContextAccessor httpContextAccessor)
         {
             _httpContextAccessor = httpContextAccessor;
         }
 
-        public byte[] GenerateCaptchaImage()
+        public byte[] GenerateCaptchaImage(string challengeId)
         {
+            if (!Guid.TryParse(challengeId, out _))
+                throw new ArgumentException("Invalid CAPTCHA challenge ID.");
+
             var context = _httpContextAccessor.HttpContext
-                ?? throw new InvalidOperationException("HTTP context unavailable.");
+                ?? throw new InvalidOperationException(
+                    "HTTP context unavailable.");
 
             var answer = GenerateAnswer(6);
             var salt = RandomNumberGenerator.GetBytes(16);
-
             var hash = ComputeHash(answer, salt);
 
-            context.Session.SetString(
-                CaptchaSessionKey,
-                Convert.ToBase64String(salt) + ":" + hash);
+            var session = context.Session;
 
-            context.Session.SetString(
-                CaptchaExpiryKey,
-                DateTimeOffset.UtcNow.AddMinutes(3).ToUnixTimeSeconds().ToString());
+            // Remove expired challenges and enforce the session limit.
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var keys = session.Keys
+                .Where(k => k.StartsWith(KeyPrefix))
+                .ToList();
 
-            var svg = BuildSvg(answer);
+            foreach (var key in keys)
+            {
+                var value = session.GetString(key);
 
-            return Encoding.UTF8.GetBytes(svg);
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    session.Remove(key);
+                    continue;
+                }
+
+                var parts = value.Split('|');
+
+                if (parts.Length != 3 ||
+                    !long.TryParse(parts[2], out var expiry) ||
+                    expiry < now)
+                {
+                    session.Remove(key);
+                }
+            }
+
+            keys = session.Keys
+                .Where(k => k.StartsWith(KeyPrefix))
+                .ToList();
+
+            while (keys.Count >= MaxChallenges)
+            {
+                session.Remove(keys[0]);
+                keys.RemoveAt(0);
+            }
+
+            var expiryTime = DateTimeOffset.UtcNow
+                .AddMinutes(ExpiryMinutes)
+                .ToUnixTimeSeconds();
+
+            var storedValue =
+                Convert.ToBase64String(salt) + "|" +
+                hash + "|" +
+                expiryTime;
+
+            session.SetString(
+                KeyPrefix + challengeId,
+                storedValue);
+
+            return Encoding.UTF8.GetBytes(BuildSvg(answer));
         }
 
-        public bool ValidateCaptcha(string? answer)
+        public bool ValidateCaptcha(
+            string challengeId,
+            string? answer)
         {
             var context = _httpContextAccessor.HttpContext;
 
-            if (context == null)
+            if (context == null ||
+                !Guid.TryParse(challengeId, out _))
                 return false;
 
-            var storedValue = context.Session.GetString(CaptchaSessionKey);
-            var expiryValue = context.Session.GetString(CaptchaExpiryKey);
+            var key = KeyPrefix + challengeId;
+            var storedValue = context.Session.GetString(key);
 
-            // Consume the challenge regardless of the result.
-            context.Session.Remove(CaptchaSessionKey);
-            context.Session.Remove(CaptchaExpiryKey);
+            // A challenge can be attempted only once.
+            context.Session.Remove(key);
 
             if (string.IsNullOrWhiteSpace(storedValue) ||
-                string.IsNullOrWhiteSpace(expiryValue) ||
                 string.IsNullOrWhiteSpace(answer))
-            {
                 return false;
-            }
 
-            if (!long.TryParse(expiryValue, out var expiry))
+            var parts = storedValue.Split('|');
+
+            if (parts.Length != 3 ||
+                !long.TryParse(parts[2], out var expiry))
                 return false;
 
             if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() > expiry)
-                return false;
-
-            var parts = storedValue.Split(':');
-
-            if (parts.Length != 2)
                 return false;
 
             try
@@ -79,7 +123,9 @@ namespace ConferenceBooking.Web.Service
                 var expectedHash = Convert.FromBase64String(parts[1]);
 
                 var suppliedHash = Convert.FromBase64String(
-                    ComputeHash(answer.Trim().ToUpperInvariant(), salt));
+                    ComputeHash(
+                        answer.Trim().ToUpperInvariant(),
+                        salt));
 
                 return CryptographicOperations.FixedTimeEquals(
                     expectedHash,
@@ -97,7 +143,9 @@ namespace ConferenceBooking.Web.Service
 
             for (int i = 0; i < length; i++)
             {
-                var index = RandomNumberGenerator.GetInt32(Characters.Length);
+                int index =
+                    RandomNumberGenerator.GetInt32(Characters.Length);
+
                 result.Append(Characters[index]);
             }
 
@@ -106,8 +154,9 @@ namespace ConferenceBooking.Web.Service
 
         private static string ComputeHash(string answer, byte[] salt)
         {
-            var input = salt.Concat(
-                Encoding.UTF8.GetBytes(answer)).ToArray();
+            var input = salt
+                .Concat(Encoding.UTF8.GetBytes(answer))
+                .ToArray();
 
             return Convert.ToBase64String(
                 SHA256.HashData(input));
@@ -115,7 +164,8 @@ namespace ConferenceBooking.Web.Service
 
         private static string BuildSvg(string answer)
         {
-            Func<int, int, int> random = RandomNumberGenerator.GetInt32;
+            Func<int, int, int> random =
+                RandomNumberGenerator.GetInt32;
 
             var svg = new StringBuilder();
 
@@ -153,7 +203,6 @@ namespace ConferenceBooking.Web.Service
             }
 
             svg.Append("</svg>");
-
             return svg.ToString();
         }
     }

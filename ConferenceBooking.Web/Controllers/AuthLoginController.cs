@@ -39,10 +39,9 @@ namespace MUS.Webapp.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Login(LoginRequestDto obj, string captcha)
+        public async Task<IActionResult> Login(LoginRequestDto obj, string captcha, string captchaId)
         {
-            // CAPTCHA must be validated before calling AuthAPI.
-            if (!_captchaService.ValidateCaptcha(captcha))
+            if (!_captchaService.ValidateCaptcha(captchaId, captcha))
             {
                 ModelState.AddModelError(
                     string.Empty,
@@ -199,12 +198,9 @@ namespace MUS.Webapp.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ForgotPassword(
-     string email,
-     string captcha)
+        public async Task<IActionResult> ForgotPassword(string email, string captcha, string captchaId)
         {
-            // Validate CAPTCHA first.
-            if (!_captchaService.ValidateCaptcha(captcha))
+            if (!_captchaService.ValidateCaptcha(captchaId, captcha))
             {
                 ModelState.AddModelError(
                     string.Empty,
@@ -493,9 +489,10 @@ namespace MUS.Webapp.Controllers
 
         [HttpGet]
         [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-        public IActionResult CaptchaImage()
+        public IActionResult CaptchaImage(string challengeId)
         {
-            var image = _captchaService.GenerateCaptchaImage();
+            var image =
+                _captchaService.GenerateCaptchaImage(challengeId);
 
             Response.Headers["Cache-Control"] =
                 "no-store, no-cache, must-revalidate";

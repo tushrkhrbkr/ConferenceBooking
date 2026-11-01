@@ -2,7 +2,7 @@
 {
     public interface ICaptchaService
     {
-        byte[] GenerateCaptchaImage();
-        bool ValidateCaptcha(string? answer);
+        byte[] GenerateCaptchaImage(string challengeId);
+        bool ValidateCaptcha(string challengeId, string? answer);
     }
 }

@@ -7,12 +7,7 @@
     Layout = null;
     ViewData["Title"] = "Verify OTP";
 }
-@if (TempData["success"] != null)
-{
-    <div class="alert alert-success" role="alert">
-        @TempData["success"]
-    </div>
-}
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -27,6 +22,12 @@
 
 <body>
     <div class="auth-bg d-flex min-vh-100 justify-content-center align-items-center">
+        @if (TempData["success"] != null)
+        {
+            <div class="alert alert-success" role="alert">
+                @TempData["success"]
+            </div>
+        }
         <div class="col-xl-4 col-lg-5 col-md-6 m-3">
             <div class="card text-center p-4">
 
