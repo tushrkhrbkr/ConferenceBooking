@@ -1502,6 +1502,10 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
         public async Task<bool> AssignRole(string username, string roleName)
         {
+            if (string.Equals(roleName,"Admin",StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
             var user = _db.ApplicationUsers.FirstOrDefault(u => u.UserName.ToLower() == username.ToLower());
             if (user != null)
             {
@@ -1529,6 +1533,10 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
         public async Task<bool> RevokeRole(string username, string roleName)
         {
+            if (string.Equals(roleName, "Admin", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
             var user = _db.ApplicationUsers.FirstOrDefault(u => u.UserName.ToLower() == username.ToLower());
             if (user != null)
             {

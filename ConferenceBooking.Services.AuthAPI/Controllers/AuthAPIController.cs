@@ -139,7 +139,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
-        [Authorize]
+        [Authorize(Roles = "Admin,ADMIN")]
         [HttpPost("AssignRole")]
         public async Task<IActionResult> AssignRole([FromBody] ManageRoleDto model)
         {
@@ -153,7 +153,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
             return Ok(_response);
         }
 
-        [Authorize]
+        [Authorize(Roles = "Admin,ADMIN")]
         [HttpPost("RevokeRole")]
         public async Task<IActionResult> RevokeRole([FromBody] ManageRoleDto model)
         {
