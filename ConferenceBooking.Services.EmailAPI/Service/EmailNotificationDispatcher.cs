@@ -120,8 +120,8 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                         }
 
                         replacements["Otp"] = payload.Otp;
-                        replacements["ValidityMinutes"] =
-                            payload.ValidityMinutes.ToString();
+                        replacements["ValidityMinutes"] = payload.ValidityMinutes.ToString();
+                        replacements["UserName"] = payload.UserName ?? "User";
 
                         break;
                     }
@@ -154,12 +154,7 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             return content;
         }
 
-        private async Task SendEmailAsync(
-            EmailNotificationOutbox notification,
-            string subject,
-            string htmlBody,
-            string? textBody,
-            CancellationToken cancellationToken)
+        private async Task SendEmailAsync(EmailNotificationOutbox notification, string subject, string htmlBody, string? textBody, CancellationToken cancellationToken)
         {
             ValidateConfiguration();
 

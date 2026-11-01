@@ -1161,6 +1161,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 };
             }
         }
+        
         public async Task<ResponseDto> GetRegistrationLookupsAsync()
         {
             try
@@ -1595,9 +1596,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
             return _response;
         }
 
-
-        public async Task<ResponseDto> ForgotPasswordAsync(
-            PasswordResetRequestDto request)
+        public async Task<ResponseDto> ForgotPasswordAsync(PasswordResetRequestDto request)
         {
             _response.Result = null;
 
@@ -1915,7 +1914,8 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         new PasswordResetOtpEmailPayloadDto
                         {
                             Otp = otp,
-                            ValidityMinutes = otpValidityMinutes
+                            ValidityMinutes = otpValidityMinutes,
+                            UserName = email.Substring(0, email.IndexOf('@'))
                         };
 
                     var outbox = await _emailNotificationService.EnqueueAsync(
@@ -2002,7 +2002,6 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 return _response;
             }
         }
-
 
         public async Task<ResponseDto> VerifyPasswordResetOtpAsync(PasswordResetVerifyOtpDto request)
         {

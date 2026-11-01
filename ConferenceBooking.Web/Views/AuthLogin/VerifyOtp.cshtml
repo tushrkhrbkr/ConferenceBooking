@@ -22,12 +22,6 @@
 
 <body>
     <div class="auth-bg d-flex min-vh-100 justify-content-center align-items-center">
-        @if (TempData["success"] != null)
-        {
-            <div class="alert alert-success" role="alert">
-                @TempData["success"]
-            </div>
-        }
         <div class="col-xl-4 col-lg-5 col-md-6 m-3">
             <div class="card text-center p-4">
 
@@ -47,6 +41,12 @@
                     An OTP has been requested for your registered email address.
                     It is valid for 5 minutes.
                 </div>
+                @if (TempData["success"] != null)
+                {
+                    <div class="alert alert-success" role="alert">
+                        @TempData["success"]
+                    </div>
+                }
                 <form asp-action="VerifyOtp"
                       method="post"
                       class="text-start">
