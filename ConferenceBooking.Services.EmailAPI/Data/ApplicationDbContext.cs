@@ -10,11 +10,25 @@ namespace ConferenceBooking.Services.EmailAPI.Data
         {
 
         }
+        public DbSet<EmailTemplate> EmailTemplates { get; set; }
+
+        public DbSet<EmailTemplateAudit> EmailTemplateAudits { get; set; }
+
+        public DbSet<EmailNotificationOutbox> EmailNotificationOutbox { get; set; }
 
         protected override void OnModelCreating(
             ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<EmailTemplate>()
+                .ToTable("Tbl_EmailTemplate");
+
+            modelBuilder.Entity<EmailTemplateAudit>()
+                .ToTable("Tbl_EmailTemplateAudit");
+
+            modelBuilder.Entity<EmailNotificationOutbox>()
+                .ToTable("Tbl_EmailNotificationOutbox");    
 
         }
 
