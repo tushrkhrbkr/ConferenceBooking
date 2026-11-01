@@ -44,7 +44,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
         }
 
 
-        [Authorize]
+        [Authorize(Roles = "Admin,ADMIN")]
         [HttpPost("approve")]
         public async Task<IActionResult> Approve([FromBody] ApproveRegistrationDto model)
         {
@@ -53,7 +53,7 @@ namespace ConferenceBooking.Services.AuthAPI.Controllers
 
             return Ok(_response);
         }
-        [Authorize]
+        [Authorize(Roles = "Admin,ADMIN")]
         [HttpPost("reject")]
         public async Task<IActionResult> Reject([FromBody] RejectRegistrationDto model)
         {

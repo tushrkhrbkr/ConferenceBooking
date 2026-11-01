@@ -752,7 +752,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 // ---------------------------------------------------------
                 var allowedRoles = new[]
                 {
-            "Admin",
+            //"Admin",
             "SubAdmin",
             "HallManager",
             "LocalUser",
@@ -2206,7 +2206,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
         private static readonly string[] AllowedRegistrationRoles =
         {
-            "ADMIN",
+            //"ADMIN",
             "SUBADMIN",
             "HALLMANAGER",
             "LOCALUSER",
