@@ -27,8 +27,15 @@ namespace ConferenceBooking.Services.EmailAPI.Data
             modelBuilder.Entity<EmailTemplateAudit>()
                 .ToTable("Tbl_EmailTemplateAudit");
 
-            modelBuilder.Entity<EmailNotificationOutbox>()
-                .ToTable("Tbl_EmailNotificationOutbox");    
+            modelBuilder.Entity<EmailNotificationOutbox>(entity =>
+            {
+                entity.ToTable("Tbl_EmailNotificationOutbox");
+
+                entity.HasKey(x => x.EmailNotificationOutboxId);
+
+                entity.Property(x => x.Status)
+                    .HasConversion<byte>();
+            });
 
         }
 

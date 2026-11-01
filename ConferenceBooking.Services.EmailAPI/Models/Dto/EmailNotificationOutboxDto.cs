@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using ConferenceBooking.Services.EmailAPI.Enums;
+using System.ComponentModel.DataAnnotations;
 
 namespace ConferenceBooking.Services.EmailAPI.Models.Dto
 {
