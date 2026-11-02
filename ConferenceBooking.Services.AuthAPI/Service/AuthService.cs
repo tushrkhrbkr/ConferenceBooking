@@ -438,15 +438,11 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
                 var emailPayload = new RegistrationRequestedEmailPayloadDto
                 {
-                    UserName = registrationRequest.RequestedDisplayName,
+                    UserName = string.IsNullOrWhiteSpace(registrationRequest.RequestedDisplayName) ? registrationRequest.RequestedUserName : registrationRequest.RequestedDisplayName,
 
-                    ApplicationReference =
-                        registrationRequest.RegistrationRequestId.ToString(),
+                    ApplicationReference = $"REG-{existingRequest.RegistrationRequestId}",
 
-                    SubmittedOn =
-                        registrationRequest.SubmittedAtUtc.ToString(
-                            "dd MMM yyyy HH:mm 'UTC'",
-                            System.Globalization.CultureInfo.InvariantCulture)
+                    SubmittedOn =  registrationRequest.SubmittedAtUtc.ToString("dd MMM yyyy HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture)
                 };
 
                 await _emailNotificationService.EnqueueAsync(
@@ -468,7 +464,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     new
                     {
                         RegistrationRequestId =
-                            registrationRequest.RegistrationRequestId,
+                            $"REG-{existingRequest.RegistrationRequestId}",
 
                         UserId = user.Id,
 
@@ -966,14 +962,37 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 _db.Tbl_RegistrationRequest
                     .Update(existingRequest);
 
-                // ---------------------------------------------------------
-                // 13. Save all changes
-                // ---------------------------------------------------------
+                // 13. Save registration, profile and role changes.
                 await _db.SaveChangesAsync();
 
-                // ---------------------------------------------------------
-                // 14. COMMIT
-                // ---------------------------------------------------------
+                // 14. Enqueue approval notification inside the same transaction.
+                if (!string.IsNullOrWhiteSpace(existingRequest.RequestedEmail))
+                {
+                    var reviewedOn = DateTime.UtcNow.ToString(
+                        "yyyy-MM-dd HH:mm 'UTC'");
+
+                    await _emailNotificationService.EnqueueAsync(
+                        EmailEventTypes.RegistrationApproved,
+                        existingRequest.RequestedEmail,
+                        new RegistrationApprovedEmailPayloadDto
+                        {
+                            UserName = string.IsNullOrWhiteSpace(existingRequest.RequestedDisplayName) ? existingRequest.RequestedUserName : existingRequest.RequestedDisplayName,
+                            ApplicationReference =
+                                $"REG-{existingRequest.RegistrationRequestId}",
+                            ReviewedOn = reviewedOn,
+                            DepartmentName = department.DepartmentName,
+                            RoleName = roleName,
+                            Remarks = existingRequest.ReviewRemarks ?? string.Empty
+                        });
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Registration approval email skipped because applicant email is missing. RequestId={RequestId}",
+                        existingRequest.RegistrationRequestId);
+                }
+
+                // 15. Commit registration changes and email outbox together.
                 await transaction.CommitAsync();
 
                 _response.IsSuccess = true;
@@ -1084,7 +1103,16 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     }
 
 
-                    await _userManager.DeleteAsync(user);
+                    var deleteResult = await _userManager.DeleteAsync(user);
+
+                    if (!deleteResult.Succeeded)
+                    {
+                        throw new InvalidOperationException(
+                            "Could not delete the rejected registration account: " +
+                            string.Join(
+                                "; ",
+                                deleteResult.Errors.Select(x => x.Description)));
+                    }
                 }
 
                 // ---------------------------------------------------------
@@ -1105,14 +1133,37 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 _db.Tbl_RegistrationRequest
                     .Update(existingRequest);
 
-                // ---------------------------------------------------------
-                // 8. Save EVERYTHING
-                // ---------------------------------------------------------
+                // 8. Save rejection status and related changes.
                 await _db.SaveChangesAsync();
 
-                // ---------------------------------------------------------
-                // 9. COMMIT
-                // ---------------------------------------------------------
+                // 9. Enqueue rejection notification before committing.
+                // Use the stored registration email because the Identity user
+                // may already have been deleted.
+                if (!string.IsNullOrWhiteSpace(existingRequest.RequestedEmail))
+                {
+                    var reviewedOn = DateTime.UtcNow.ToString(
+                        "yyyy-MM-dd HH:mm 'UTC'");
+
+                    await _emailNotificationService.EnqueueAsync(
+                        EmailEventTypes.RegistrationRejected,
+                        existingRequest.RequestedEmail,
+                        new RegistrationRejectedEmailPayloadDto
+                        {
+                            UserName = string.IsNullOrWhiteSpace(existingRequest.RequestedDisplayName) ? existingRequest.RequestedUserName : existingRequest.RequestedDisplayName,
+                            ApplicationReference =
+                                $"REG-{existingRequest.RegistrationRequestId}",
+                            ReviewedOn = reviewedOn,
+                            Remarks = existingRequest.ReviewRemarks ?? string.Empty
+                        });
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Registration rejection email skipped because applicant email is missing. RequestId={RequestId}",
+                        existingRequest.RegistrationRequestId);
+                }
+
+                // 10. Commit rejection and outbox record together.
                 await transaction.CommitAsync();
 
                 _response.IsSuccess = true;
@@ -1598,25 +1649,90 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
         public async Task<ResponseDto> ChangePassword(PasswordChangeDto model)
         {
-            var user = await _userManager.FindByIdAsync(model.UserID);
-            if (user != null)
+            if (model == null ||
+                string.IsNullOrWhiteSpace(model.UserID))
             {
-                var result = await _userManager.ChangePasswordAsync(user, model.OldPassword, model.NewPassword);
-                if (result.Succeeded)
+                _response.IsSuccess = false;
+                _response.Message = "Invalid password change request.";
+                return _response;
+            }
+
+            await using var transaction =
+                await _db.Database.BeginTransactionAsync();
+
+            try
+            {
+                var user =
+                    await _userManager.FindByIdAsync(model.UserID);
+
+                if (user == null)
                 {
-                    _response.Result = "Password Changed Successfully.";
+                    await transaction.RollbackAsync();
+
+                    _response.IsSuccess = false;
+                    _response.Message = "No user found!!!";
+
+                    return _response;
+                }
+
+                var result =
+                    await _userManager.ChangePasswordAsync(
+                        user,
+                        model.OldPassword,
+                        model.NewPassword);
+
+                if (!result.Succeeded)
+                {
+                    await transaction.RollbackAsync();
+
+                    _response.IsSuccess = false;
+                    _response.Message =
+                        result.Errors.FirstOrDefault()?.Description
+                        ?? "Password change failed.";
+
+                    return _response;
+                }
+
+                // Enqueue notification within the Identity transaction.
+                if (!string.IsNullOrWhiteSpace(user.Email))
+                {
+                    await _emailNotificationService.EnqueueAsync(
+                        EmailEventTypes.PasswordChanged,
+                        user.Email,
+                        new PasswordChangedEmailPayloadDto
+                        {
+                            UserName =
+                                user.UserName ?? user.Email,
+                            ChangedOn = DateTime.UtcNow.ToString(
+                                "yyyy-MM-dd HH:mm 'UTC'")
+                        });
                 }
                 else
                 {
-                    _response.IsSuccess = false;
-                    _response.Message = result.Errors.FirstOrDefault().Description;
+                    _logger.LogWarning(
+                        "Password changed but notification was skipped because user email is missing. UserId={UserId}",
+                        user.Id);
                 }
+
+                await transaction.CommitAsync();
+
+                _response.IsSuccess = true;
+                _response.Message = "Password Changed Successfully.";
+                _response.Result = null;
             }
-            else
+            catch (Exception ex)
             {
+                await transaction.RollbackAsync();
+
+                _logger.LogError(
+                    ex,
+                    "Password change operation failed. UserId={UserId}",
+                    model.UserID);
+
                 _response.IsSuccess = false;
-                _response.Message = "No user found!!!";
+                _response.Message = "Password change failed.";
             }
+
             return _response;
         }
 
@@ -2330,6 +2446,27 @@ namespace ConferenceBooking.Services.AuthAPI.Service
 
             await _db.SaveChangesAsync();
 
+            // Queue confirmation after the Identity password reset succeeds.
+            if (!string.IsNullOrWhiteSpace(user.Email))
+            {
+                await _emailNotificationService.EnqueueAsync(
+                    EmailEventTypes.PasswordResetSuccess,
+                    user.Email,
+                    new PasswordResetSuccessEmailPayloadDto
+                    {
+                        UserName = user.UserName ?? user.Email,
+                        ResetOn = DateTime.UtcNow.ToString(
+                            "yyyy-MM-dd HH:mm 'UTC'")
+                    });
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Password reset completed but confirmation email was skipped because user email is missing. UserId={UserId}",
+                    user.Id);
+            }
+
+            // Commit consumed reset token and notification together.
             await transaction.CommitAsync();
 
             _response.IsSuccess = true;

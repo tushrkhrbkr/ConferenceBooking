@@ -92,13 +92,21 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                 "PasswordResetOtp" => "PASSWORD_RESET_OTP",
 
                 "RegistrationRequested" => "REGISTRATION_REQUESTED",
+
+                "RegistrationApproved" => "REGISTRATION_APPROVED",
+
+                "RegistrationRejected" => "REGISTRATION_REJECTED",
+
+                "PasswordResetSuccess" => "PASSWORD_RESET_SUCCESS",
+
+                "PasswordChanged" => "PASSWORD_CHANGED",
+
                 _ => throw new NotSupportedException(
                     $"Unsupported email event type: {eventType}")
             };
         }
 
-        private static Dictionary<string, string> BuildReplacements(
-            EmailNotificationOutbox notification)
+        private static Dictionary<string, string> BuildReplacements(EmailNotificationOutbox notification)
         {
             var replacements = new Dictionary<string, string>(
                 StringComparer.OrdinalIgnoreCase);
@@ -121,7 +129,8 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                         }
 
                         replacements["Otp"] = payload.Otp;
-                        replacements["ValidityMinutes"] = payload.ValidityMinutes.ToString();
+                        replacements["ValidityMinutes"] =
+                            payload.ValidityMinutes.ToString();
                         replacements["UserName"] = payload.UserName ?? "User";
 
                         break;
@@ -147,6 +156,102 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                         replacements["ApplicationReference"] =
                             payload.ApplicationReference;
                         replacements["SubmittedOn"] = payload.SubmittedOn;
+
+                        break;
+                    }
+
+                case "RegistrationApproved":
+                    {
+                        var payload =
+                            JsonSerializer.Deserialize<RegistrationApprovedEmailDto>(
+                                notification.PayloadJson,
+                                JsonOptions);
+
+                        if (payload == null ||
+                            string.IsNullOrWhiteSpace(payload.UserName) ||
+                            string.IsNullOrWhiteSpace(payload.ApplicationReference) ||
+                            string.IsNullOrWhiteSpace(payload.ReviewedOn) ||
+                            string.IsNullOrWhiteSpace(payload.DepartmentName) ||
+                            string.IsNullOrWhiteSpace(payload.RoleName))
+                        {
+                            throw new InvalidOperationException(
+                                "Invalid registration approved email payload.");
+                        }
+
+                        replacements["UserName"] = payload.UserName;
+                        replacements["ApplicationReference"] =
+                            payload.ApplicationReference;
+                        replacements["ReviewedOn"] = payload.ReviewedOn;
+                        replacements["DepartmentName"] = payload.DepartmentName;
+                        replacements["RoleName"] = payload.RoleName;
+                        replacements["Remarks"] = payload.Remarks ?? string.Empty;
+
+                        break;
+                    }
+
+                case "RegistrationRejected":
+                    {
+                        var payload =
+                            JsonSerializer.Deserialize<RegistrationRejectedEmailDto>(
+                                notification.PayloadJson,
+                                JsonOptions);
+
+                        if (payload == null ||
+                            string.IsNullOrWhiteSpace(payload.UserName) ||
+                            string.IsNullOrWhiteSpace(payload.ApplicationReference) ||
+                            string.IsNullOrWhiteSpace(payload.ReviewedOn))
+                        {
+                            throw new InvalidOperationException(
+                                "Invalid registration rejected email payload.");
+                        }
+
+                        replacements["UserName"] = payload.UserName;
+                        replacements["ApplicationReference"] =
+                            payload.ApplicationReference;
+                        replacements["ReviewedOn"] = payload.ReviewedOn;
+                        replacements["Remarks"] = payload.Remarks ?? string.Empty;
+
+                        break;
+                    }
+
+                case "PasswordChanged":
+                    {
+                        var payload =
+                            JsonSerializer.Deserialize<PasswordChangedEmailDto>(
+                                notification.PayloadJson,
+                                JsonOptions);
+
+                        if (payload == null ||
+                            string.IsNullOrWhiteSpace(payload.UserName) ||
+                            string.IsNullOrWhiteSpace(payload.ChangedOn))
+                        {
+                            throw new InvalidOperationException(
+                                "Invalid password changed email payload.");
+                        }
+
+                        replacements["UserName"] = payload.UserName;
+                        replacements["ChangedOn"] = payload.ChangedOn;
+
+                        break;
+                    }
+
+                case "PasswordResetSuccess":
+                    {
+                        var payload =
+                            JsonSerializer.Deserialize<PasswordResetSuccessEmailDto>(
+                                notification.PayloadJson,
+                                JsonOptions);
+
+                        if (payload == null ||
+                            string.IsNullOrWhiteSpace(payload.UserName) ||
+                            string.IsNullOrWhiteSpace(payload.ResetOn))
+                        {
+                            throw new InvalidOperationException(
+                                "Invalid password reset success email payload.");
+                        }
+
+                        replacements["UserName"] = payload.UserName;
+                        replacements["ResetOn"] = payload.ResetOn;
 
                         break;
                     }
