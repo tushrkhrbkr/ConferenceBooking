@@ -4,8 +4,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using ConferenceBooking.Services.BookingAPI;
 using ConferenceBooking.Services.BookingAPI.Data;
-using ConferenceBooking.Services.BookingAPI.Service;
-using ConferenceBooking.Services.BookingAPI.Service.IService;
 using ConferenceBooking.Services.BookingAPI.Models;
 using ConferenceBooking.Services.BookingAPI.Extensions;
 
