@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using ConferenceBooking.Services.BookingAPI;
 using ConferenceBooking.Services.BookingAPI.Data;
+using ConferenceBooking.Services.BookingAPI.Service;
+using ConferenceBooking.Services.BookingAPI.Service.IService;
 using ConferenceBooking.Services.BookingAPI.Models;
 using ConferenceBooking.Services.BookingAPI.Extensions;
 
@@ -18,7 +20,23 @@ IMapper mapper = MappingConfig.RegisterMaps().CreateMapper();
 builder.Services.AddSingleton(mapper);
 builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("AdminOnly", policy =>
+        policy.RequireRole("Admin"));
+
+    options.AddPolicy("AdminOrSubAdmin", policy =>
+        policy.RequireRole("Admin", "SUBADMIN"));
+
+    options.AddPolicy("HallManagement", policy =>
+        policy.RequireRole("Admin", "SUBADMIN", "HALLMANAGER"));
+
+    options.AddPolicy("AuthenticatedUser", policy =>
+        policy.RequireAuthenticatedUser());
+});
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
