@@ -108,6 +108,7 @@ namespace MUS.Webapp.Controllers
 
             return View(obj);
         }
+        
         public async Task<IActionResult> Logout()
         {
             var sessionIdStr = HttpContext.Session.GetString("SessionId");
@@ -155,21 +156,29 @@ namespace MUS.Webapp.Controllers
         [HttpGet]
         public IActionResult PasswordChange()
         {
+            var userid = HttpContext.Session.GetString("UserID");
+            //var userid = _sessionCache.Get<string>("UserID");
+            if (userid == null)
+            {
+                return RedirectToAction("Login", "AuthLogin");
+            }
+
             return View();
         }
         
         [HttpPost]
         public async Task<IActionResult> PasswordChange(PasswordChangeDto model)
         {
+            var userid = HttpContext.Session.GetString("UserID");
+            //var userid = _sessionCache.Get<string>("UserID");
+            if (userid == null)
+            {
+                return RedirectToAction("Login", "AuthLogin");
+            }
+            model.UserID = userid;
+            
             if (ModelState.IsValid)
             {
-                var userid = HttpContext.Session.GetString("UserID");
-                //var userid = _sessionCache.Get<string>("UserID");
-                if (userid == null)
-                {
-                    return RedirectToAction("Login", "AuthLogin");
-                }
-                model.UserID = userid;
                 ResponseDto responseDto = await _authService.PasswordChange(model);
 
                 if (responseDto != null && responseDto.IsSuccess)
@@ -304,6 +313,16 @@ namespace MUS.Webapp.Controllers
                 return View();
             }
 
+            if (!System.Text.RegularExpressions.Regex.IsMatch(otp, @"^[0-9]{6}$"))
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "OTP must contain exactly six numeric digits.");
+
+                ViewBag.Email = email;
+                return View();
+            }
+
             var request = new PasswordResetInternalVerifyOtpdto
             {
                 Email = email.Trim(),
@@ -386,10 +405,11 @@ namespace MUS.Webapp.Controllers
 
             if (response != null && response.IsSuccess)
             {
-                TempData["success"] =
-                    "Your password has been reset successfully. Please log in.";
+                //TempData["success"] =
+                //    "Your password has been reset successfully. Please log in.";
 
-                return RedirectToAction(nameof(Login));
+                TempData["PasswordResetCompleted"] = "true";
+                return RedirectToAction(nameof(ResetPasswordSuccess));
             }
 
             ModelState.AddModelError(
@@ -399,6 +419,16 @@ namespace MUS.Webapp.Controllers
             return View(model);
         }
 
+        [HttpGet]
+        public IActionResult ResetPasswordSuccess()
+        {
+            if (TempData["PasswordResetCompleted"]?.ToString() != "true")
+            {
+                return RedirectToAction(nameof(Login));
+            }
+
+            return View();
+        }
 
         [HttpGet]
         public IActionResult Register()
@@ -472,11 +502,32 @@ namespace MUS.Webapp.Controllers
 
             if (response != null && response.IsSuccess)
             {
-                TempData["success"] =
-                    "Your registration request has been submitted. " +
-                    "You can log in after the Administrator approves it.";
+                string registrationReference = string.Empty;
 
-                return RedirectToAction(nameof(Login));
+                if (response.Result != null)
+                {
+                    var resultJson = JObject.Parse(
+                        JsonConvert.SerializeObject(response.Result));
+
+                    registrationReference =
+                        resultJson["registrationRequestId"]?.ToString()
+                        ?? resultJson["RegistrationRequestId"]?.ToString()
+                        ?? string.Empty;
+                }
+
+                if (string.IsNullOrWhiteSpace(registrationReference))
+                {
+                    ModelState.AddModelError(
+                        string.Empty,
+                        "Registration was submitted, but the reference number " +
+                        "could not be retrieved. Please contact the administrator.");
+
+                    return View(model);
+                }
+
+                TempData["RegistrationReference"] = registrationReference;
+
+                return RedirectToAction(nameof(RegistrationSuccess));
             }
 
             ModelState.AddModelError(
@@ -485,6 +536,20 @@ namespace MUS.Webapp.Controllers
                 "Registration could not be completed. Please try again.");
 
             return View(model);
+        }
+
+        [HttpGet]
+        public IActionResult RegistrationSuccess()
+        {
+            var registrationReference =
+                TempData["RegistrationReference"]?.ToString();
+
+            if (string.IsNullOrWhiteSpace(registrationReference))
+                return RedirectToAction(nameof(Register));
+
+            ViewBag.RegistrationReference = registrationReference;
+
+            return View();
         }
 
         [HttpGet]

@@ -440,7 +440,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                 {
                     UserName = string.IsNullOrWhiteSpace(registrationRequest.RequestedDisplayName) ? registrationRequest.RequestedUserName : registrationRequest.RequestedDisplayName,
 
-                    ApplicationReference = $"REG-{existingRequest.RegistrationRequestId}",
+                    ApplicationReference = $"REG-{registrationRequest.RegistrationRequestId}",
 
                     SubmittedOn =  registrationRequest.SubmittedAtUtc.ToString("dd MMM yyyy HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture)
                 };
@@ -464,7 +464,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                     new
                     {
                         RegistrationRequestId =
-                            $"REG-{existingRequest.RegistrationRequestId}",
+                            $"REG-{registrationRequest.RegistrationRequestId}",
 
                         UserId = user.Id,
 
@@ -1150,8 +1150,7 @@ namespace ConferenceBooking.Services.AuthAPI.Service
                         new RegistrationRejectedEmailPayloadDto
                         {
                             UserName = string.IsNullOrWhiteSpace(existingRequest.RequestedDisplayName) ? existingRequest.RequestedUserName : existingRequest.RequestedDisplayName,
-                            ApplicationReference =
-                                $"REG-{existingRequest.RegistrationRequestId}",
+                            ApplicationReference = $"REG-{existingRequest.RegistrationRequestId}",
                             ReviewedOn = reviewedOn,
                             Remarks = existingRequest.ReviewRemarks ?? string.Empty
                         });

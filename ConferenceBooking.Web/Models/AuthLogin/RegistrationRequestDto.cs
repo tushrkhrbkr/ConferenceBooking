@@ -19,9 +19,10 @@ namespace ConferenceBooking.Web.Models.AuthLogin
         [StringLength(256)]
         public string Email { get; set; } = string.Empty;
 
-        [Required]
-        [Phone]
-        [StringLength(30)]
+        [Required(ErrorMessage = "Mobile number is required.")]
+        [RegularExpression(
+            @"^[0-9]{10}$",
+            ErrorMessage = "Mobile number must contain exactly 10 digits.")]
         [Display(Name = "Mobile number")]
         public string MobileNumber { get; set; } = string.Empty;
 

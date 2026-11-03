@@ -74,10 +74,22 @@
 
                         <div class="mb-3">
                             <label asp-for="MobileNumber" class="form-label"></label>
-                            <input asp-for="MobileNumber" class="form-control"
-                                   type="tel" autocomplete="tel" />
+
+                            <input asp-for="MobileNumber"
+                                   class="form-control"
+                                   type="tel"
+                                   inputmode="numeric"
+                                   autocomplete="tel-national"
+                                   maxlength="10"
+                                   pattern="[0-9]{10}"
+                                   placeholder="Enter 10-digit mobile number" />
+
                             <span asp-validation-for="MobileNumber"
                                   class="text-danger"></span>
+
+                            <small class="text-muted">
+                                Enter a 10-digit mobile number without country code.
+                            </small>
                         </div>
 
                         <div class="mb-3">
@@ -129,6 +141,25 @@
 
     <script src="~/assets/vendor.min.js"></script>
     <script src="~/assets/app.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+
+            const mobileInput =
+                document.getElementById("MobileNumber");
+
+            if (!mobileInput) return;
+
+            mobileInput.addEventListener("input", function () {
+
+                // Remove all non-numeric characters.
+                this.value = this.value
+                    .replace(/[^0-9]/g, "")
+                    .slice(0, 10);
+
+            });
+
+        });
+    </script>
     <partial name="_ValidationScriptsPartial" />
 </body>
 </html>

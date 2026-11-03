@@ -1,0 +1,153 @@
+﻿@*
+    For more information on enabling MVC for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
+*@
+@{
+}
+
+@{
+    Layout = null;
+    ViewData["Title"] = "Registration Submitted | CONVENE";
+
+    var registrationReference =
+        ViewBag.RegistrationReference?.ToString() ?? "";
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Registration Submitted | CONVENE</title>
+
+    <link href="~/assets/vendor.min.css" rel="stylesheet" />
+    <link href="~/assets/app.min.css" rel="stylesheet" />
+    <link href="~/assets/icons.min.css" rel="stylesheet" />
+
+    <style>
+        .success-icon {
+            width: 85px;
+            height: 85px;
+            border-radius: 50%;
+            background: #e6f6ed;
+            color: #198754;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            font-size: 42px;
+        }
+
+        .registration-reference {
+            background: #f1f4f9;
+            border: 1px dashed #3159a5;
+            border-radius: 8px;
+            padding: 18px;
+        }
+
+        .reference-number {
+            color: #243b64;
+            font-size: 25px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="auth-bg d-flex min-vh-100 justify-content-center align-items-center">
+
+        <div class="col-xl-5 col-lg-6 col-md-8 m-3">
+
+            <div class="card text-center p-4">
+
+                <a asp-controller="AuthLogin"
+                   asp-action="Login"
+                   class="auth-brand mb-3">
+
+                    <img src="~/images/ConveneDarkLogoIndia.png"
+                         height="85"
+                         alt="CONVENE" />
+                </a>
+
+                <div class="success-icon">
+                    <i class="ti ti-check"></i>
+                </div>
+
+                <h3 class="fw-semibold text-success mb-2">
+                    Registration Submitted!
+                </h3>
+
+                <p class="text-muted mb-4">
+                    Your registration request has been successfully
+                    submitted to the CONVENE Administrator.
+                </p>
+
+                <div class="registration-reference mb-4">
+
+                    <div class="text-muted small mb-2">
+                        YOUR REGISTRATION REFERENCE NUMBER
+                    </div>
+
+                    <div class="reference-number">
+                        @registrationReference
+                    </div>
+
+                </div>
+
+                <div class="alert alert-info text-start">
+
+                    <h6 class="fw-semibold mb-2">
+                        <i class="ti ti-mail me-1"></i>
+                        What happens next?
+                    </h6>
+
+                    <p class="mb-2">
+                        Your registration request will be reviewed
+                        by the concerned Administrator.
+                    </p>
+
+                    <p class="mb-0">
+                        Any action taken on your registration request,
+                        including approval or rejection, will be
+                        communicated to you through your registered
+                        email address.
+                    </p>
+
+                </div>
+
+                <p class="text-muted small">
+                    Please retain your registration reference number
+                    for future correspondence.
+                </p>
+
+                <div class="d-grid mt-3">
+
+                    <a asp-controller="AuthLogin"
+                       asp-action="Login"
+                       class="btn btn-primary">
+
+                        <i class="ti ti-login me-1"></i>
+                        Go to Login
+
+                    </a>
+
+                </div>
+
+                <p class="text-muted small mt-4 mb-0">
+                    Developed by Software Development Cell,
+                    MAC, New Delhi.
+                </p>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <script src="~/assets/vendor.min.js"></script>
+    <script src="~/assets/app.js"></script>
+
+</body>
+</html>
