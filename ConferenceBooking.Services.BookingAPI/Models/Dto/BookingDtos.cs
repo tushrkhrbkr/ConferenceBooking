@@ -17,6 +17,7 @@ namespace ConferenceBooking.Services.BookingAPI.Models.Dto
         public int? Capacity { get; set; }
         public string? Description { get; set; }
         public bool IsActive { get; set; }
+        public byte[] RowVersion { get; set; } = null!;
         public List<FacilityDto> Facilities { get; set; } = new();
         public List<VCPlatformDto> VCPlatforms { get; set; } = new();
     }

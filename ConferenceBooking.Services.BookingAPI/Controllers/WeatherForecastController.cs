@@ -2,7 +2,7 @@ using ConferenceBooking.Services.BookingAPI.Service.IService;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace ConferenceBooking.Services.EmailAPI.Controllers
+namespace ConferenceBooking.Services.BookingAPI.Controllers
 {
 
     [ApiController]
