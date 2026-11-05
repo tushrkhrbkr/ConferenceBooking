@@ -24,6 +24,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IConferenceHallService, ConferenceHallService>();
 builder.Services.AddScoped<IFacilityService, FacilityService>();
+builder.Services.AddScoped<IVCPlatformService, VCPlatformService>();
 
 builder.Services.AddAuthorization(options =>
 {

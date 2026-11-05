@@ -123,6 +123,14 @@ namespace ConferenceBooking.Services.BookingAPI.Models.Dto
         [StringLength(1000)] public string? Description { get; set; }
     }
 
+    public class UpdateVCPlatformDto : CreateVCPlatformDto
+    {
+        [Required]
+        public int VCPlatformId { get; set; }
+
+        public bool IsActive { get; set; }
+    }
+
     public class HallVCPlatformSelectionDto
     {
         [Required] public int VCPlatformId { get; set; }

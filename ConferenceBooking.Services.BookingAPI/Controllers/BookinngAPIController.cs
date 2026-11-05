@@ -12,13 +12,16 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
     {
         private readonly IConferenceHallService _conferenceHallService;
         private readonly IFacilityService _facilityService;
+        private readonly IVCPlatformService _vcPlatformService;
 
         public BookingAPIController(
             IConferenceHallService conferenceHallService,
-            IFacilityService facilityService)
+            IFacilityService facilityService,
+            IVCPlatformService vcPlatformService)
         {
             _conferenceHallService = conferenceHallService;
             _facilityService = facilityService;
+            _vcPlatformService = vcPlatformService;
         }
 
         // =========================================================
@@ -173,6 +176,109 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
         {
             var response = await _facilityService.UnmapFacilityFromHall(
                 hallId, facilityId, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // =========================================================
+        // VC PLATFORM MASTER APIs
+        // =========================================================
+
+        // GET: api/vc-platforms
+        [HttpGet("~/api/vc-platforms")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> GetAllVCPlatforms(
+            [FromQuery] bool activeOnly = true,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _vcPlatformService.GetAll(
+                activeOnly, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // GET: api/vc-platforms/5
+        [HttpGet("~/api/vc-platforms/{id:int}")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> GetVCPlatformById(
+            int id,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _vcPlatformService.GetById(
+                id, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // POST: api/vc-platforms
+        [HttpPost("~/api/vc-platforms")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> CreateVCPlatform(
+            [FromBody] CreateVCPlatformDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _vcPlatformService.Create(
+                dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // PUT: api/vc-platforms/5
+        [HttpPut("~/api/vc-platforms/{id:int}")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> UpdateVCPlatform(
+            int id,
+            [FromBody] UpdateVCPlatformDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _vcPlatformService.Update(
+                id, dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // =========================================================
+        // HALL-VC PLATFORM MAPPING APIs
+        // =========================================================
+
+        // GET: api/conference-halls/5/vc-platforms
+        [HttpGet("{hallId:int}/vc-platforms")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> GetHallVCPlatforms(
+            int hallId,
+            [FromQuery] bool activeOnly = true,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _vcPlatformService.GetHallVCPlatforms(
+                hallId, activeOnly, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // POST: api/conference-halls/5/vc-platforms
+        [HttpPost("{hallId:int}/vc-platforms")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> MapVCPlatformToHall(
+            int hallId,
+            [FromBody] HallVCPlatformSelectionDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _vcPlatformService.MapVCPlatformToHall(
+                hallId, dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // DELETE: api/conference-halls/5/vc-platforms/3
+        [HttpDelete("{hallId:int}/vc-platforms/{vcPlatformId:int}")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> UnmapVCPlatformFromHall(
+            int hallId,
+            int vcPlatformId,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _vcPlatformService.UnmapVCPlatformFromHall(
+                hallId, vcPlatformId, cancellationToken);
 
             return StatusCode(response.StatusCode, response);
         }
