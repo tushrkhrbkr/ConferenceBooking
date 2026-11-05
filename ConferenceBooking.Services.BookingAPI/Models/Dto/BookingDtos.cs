@@ -32,12 +32,18 @@ namespace ConferenceBooking.Services.BookingAPI.Models.Dto
         [StringLength(1000)] public string? Description { get; set; }
     }
 
+
     public class UpdateHallDto : CreateHallDto
     {
-        [Required] public int ConferenceHallId { get; set; }
+        [Required]
+        public int ConferenceHallId { get; set; }
+
         public bool IsActive { get; set; }
-        public byte[]? RowVersion { get; set; }
+
+        [Required]
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
     }
+
 
     public class HallUserMappingDto
     {

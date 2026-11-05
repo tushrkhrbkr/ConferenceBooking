@@ -1,10 +1,8 @@
-﻿using AutoMapper;
+﻿
 using ConferenceBooking.Services.BookingAPI.Data;
 using ConferenceBooking.Services.BookingAPI.Models;
 using ConferenceBooking.Services.BookingAPI.Models.Dto;
 using ConferenceBooking.Services.BookingAPI.Service.IService;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace ConferenceBooking.Services.BookingAPI.Service
@@ -12,30 +10,26 @@ namespace ConferenceBooking.Services.BookingAPI.Service
     public class ConferenceHallService : IConferenceHallService
     {
         private readonly ApplicationDbContext _db;
-        private IMapper _mapper;
         private readonly ICurrentUserService _currentUser;
-        private readonly IConferenceHallService _conferenceHallService;
-        private readonly ResponseDto _response;
 
         public ConferenceHallService(
-            ApplicationDbContext db, IMapper mapper,
-            ICurrentUserService currentUser,
-            IConferenceHallService conferenceHallService)
+            ApplicationDbContext db,
+            ICurrentUserService currentUser)
         {
             _db = db;
-            _mapper = mapper;
             _currentUser = currentUser;
-            _conferenceHallService = conferenceHallService;
-            _response = new ResponseDto();
         }
 
-        public async Task<ResponseDto> GetAll(bool activeOnly = true,
+        public async Task<ResponseDto> GetAll(
+            bool activeOnly = true,
             CancellationToken cancellationToken = default)
         {
             var query = _db.ConferenceHalls.AsNoTracking();
 
             if (activeOnly)
+            {
                 query = query.Where(x => x.IsActive);
+            }
 
             var halls = await query
                 .OrderBy(x => x.LocationType)
@@ -54,15 +48,18 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                 })
                 .ToListAsync(cancellationToken);
 
-            _response.IsSuccess = true;
-            _response.Result = halls;
-
-            return _response;
+            return new ResponseDto
+            {
+                IsSuccess = true,
+                StatusCode = 200,
+                Message = "Conference halls retrieved successfully.",
+                Result = halls
+            };
         }
 
         public async Task<ResponseDto> GetById(
             int id,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             var hall = await _db.ConferenceHalls
                 .AsNoTracking()
@@ -83,26 +80,37 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
             if (hall == null)
             {
-                _response.IsSuccess = false;
-                _response.Message = "Conference hall not found.";
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 404,
+                    Message = "Conference hall not found."
+                };
             }
 
-            _response.IsSuccess = true;
-            _response.Message = "Conference hall retrieved successfully.";
-            _response.Result = hall;
-
-            return _response;
+            return new ResponseDto
+            {
+                IsSuccess = true,
+                StatusCode = 200,
+                Message = "Conference hall retrieved successfully.",
+                Result = hall
+            };
         }
 
         public async Task<ResponseDto> Create(
             CreateHallDto dto,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrWhiteSpace(_currentUser.UserId))
+            var userId = _currentUser.UserId;
+
+            if (string.IsNullOrWhiteSpace(userId))
             {
-                _response.IsSuccess = false;
-                _response.Message = "Unauthorized";
-                return _response;
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 401,
+                    Message = "Authenticated user information is not available."
+                };
             }
 
             var code = dto.HallCode.Trim();
@@ -112,9 +120,12 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
             if (exists)
             {
-                _response.IsSuccess = false;
-                _response.Message = "A conference hall with this code already exists.";
-                return _response;
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 409,
+                    Message = "A conference hall with this code already exists."
+                };
             }
 
             var hall = new ConferenceHall
@@ -127,37 +138,70 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                 Description = dto.Description?.Trim(),
                 IsActive = true,
                 CreatedAtUtc = DateTime.UtcNow,
-                CreatedByUserId = _currentUser.UserId
+                CreatedByUserId = userId
             };
 
             _db.ConferenceHalls.Add(hall);
+
             await _db.SaveChangesAsync(cancellationToken);
 
-            _response.IsSuccess = true;
-            _response.Message = "Conference hall created successfully.";
-            _response.Result = hall;
+            var result = new ConferenceHallDto
+            {
+                ConferenceHallId = hall.ConferenceHallId,
+                HallCode = hall.HallCode,
+                HallName = hall.HallName,
+                LocationType = hall.LocationType,
+                LocationName = hall.LocationName,
+                Capacity = hall.Capacity,
+                Description = hall.Description,
+                IsActive = hall.IsActive,
+                RowVersion = hall.RowVersion
+            };
 
-            return _response;
-
-
+            return new ResponseDto
+            {
+                IsSuccess = true,
+                StatusCode = 201,
+                Message = "Conference hall created successfully.",
+                Result = result
+            };
         }
 
         public async Task<ResponseDto> Update(
-            int id, UpdateHallDto dto,
-            CancellationToken cancellationToken)
+            int id,
+            UpdateHallDto dto,
+            CancellationToken cancellationToken = default)
         {
             if (id != dto.ConferenceHallId)
             {
-                _response.IsSuccess = false;
-                _response.Message = "Route ID and request ID do not match.";
-                return _response;
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 400,
+                    Message = "Route ID and request ID do not match."
+                };
             }
 
-            if (string.IsNullOrWhiteSpace(_currentUser.UserId))
+            if (dto.RowVersion == null || dto.RowVersion.Length == 0)
             {
-                _response.IsSuccess = false;
-                _response.Message = "Unauthorized";
-                return _response;
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 400,
+                    Message = "RowVersion is required. Reload the hall and submit its latest RowVersion."
+                };
+            }
+
+            var userId = _currentUser.UserId;
+
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 401,
+                    Message = "Authenticated user information is not available."
+                };
             }
 
             var hall = await _db.ConferenceHalls
@@ -167,9 +211,23 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
             if (hall == null)
             {
-                _response.IsSuccess = false;
-                _response.Message = "Conference hall not found.";
-                return _response;
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 404,
+                    Message = "Conference hall not found."
+                };
+            }
+
+            // Check whether the client is updating the latest version.
+            if (!hall.RowVersion.SequenceEqual(dto.RowVersion))
+            {
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 409,
+                    Message = "This hall was modified by another user. Reload the hall and try again."
+                };
             }
 
             var code = dto.HallCode.Trim();
@@ -180,22 +238,13 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     cancellationToken);
 
             if (duplicate)
-
             {
-                _response.IsSuccess = false;
-                _response.Message = "Another conference hall already uses this code.";
-                return _response;
-            }
-
-            // Optional optimistic concurrency check.
-            if (dto.RowVersion is { Length: > 0 } &&
-                !hall.RowVersion.SequenceEqual(dto.RowVersion))
-            {
-
-                _response.IsSuccess = false;
-                _response.Message = "This hall was modified by another user. Reload and try again.";
-                return _response;
-
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 409,
+                    Message = "Another conference hall already uses this code."
+                };
             }
 
             hall.HallCode = code;
@@ -206,15 +255,42 @@ namespace ConferenceBooking.Services.BookingAPI.Service
             hall.Description = dto.Description?.Trim();
             hall.IsActive = dto.IsActive;
             hall.UpdatedAtUtc = DateTime.UtcNow;
-            hall.UpdatedByUserId = _currentUser.UserId;
+            hall.UpdatedByUserId = userId;
 
-            await _db.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return new ResponseDto
+                {
+                    IsSuccess = false,
+                    StatusCode = 409,
+                    Message = "This hall was modified by another user. Reload the hall and try again."
+                };
+            }
 
-            _response.IsSuccess = true;
-            _response.Message = "Conference hall updated successfully.";
-            _response.Result = hall;
-            return _response;
+            var result = new ConferenceHallDto
+            {
+                ConferenceHallId = hall.ConferenceHallId,
+                HallCode = hall.HallCode,
+                HallName = hall.HallName,
+                LocationType = hall.LocationType,
+                LocationName = hall.LocationName,
+                Capacity = hall.Capacity,
+                Description = hall.Description,
+                IsActive = hall.IsActive,
+                RowVersion = hall.RowVersion
+            };
 
+            return new ResponseDto
+            {
+                IsSuccess = true,
+                StatusCode = 200,
+                Message = "Conference hall updated successfully.",
+                Result = result
+            };
         }
     }
 }
