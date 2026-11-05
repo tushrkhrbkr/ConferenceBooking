@@ -85,6 +85,16 @@ namespace ConferenceBooking.Services.BookingAPI.Models.Dto
         public int DisplayOrder { get; set; }
     }
 
+
+    public class UpdateFacilityDto : CreateFacilityDto
+    {
+        [Required]
+        public int FacilityId { get; set; }
+
+        public bool IsActive { get; set; }
+    }
+
+
     public class HallFacilitySelectionDto
     {
         [Required] public int FacilityId { get; set; }
