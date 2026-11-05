@@ -15,13 +15,18 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
     {
         private readonly ApplicationDbContext _db;
         private readonly ICurrentUserService _currentUser;
+        private readonly IConferenceHallService _conferenceHallService;
+        private ResponseDto _response;
 
         public ConferenceHallController(
             ApplicationDbContext db,
-            ICurrentUserService currentUser)
+            ICurrentUserService currentUser,
+            IConferenceHallService conferenceHallService)
         {
             _db = db;
             _currentUser = currentUser;
+            _response = new ResponseDto();
+            _conferenceHallService = conferenceHallService;
         }
 
         // GET: api/conference-halls
@@ -31,33 +36,8 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
             [FromQuery] bool activeOnly = true,
             CancellationToken cancellationToken = default)
         {
-            var query = _db.ConferenceHalls.AsNoTracking();
-
-            if (activeOnly)
-                query = query.Where(x => x.IsActive);
-
-            var halls = await query
-                .OrderBy(x => x.LocationType)
-                .ThenBy(x => x.HallName)
-                .Select(x => new ConferenceHallDto
-                {
-                    ConferenceHallId = x.ConferenceHallId,
-                    HallCode = x.HallCode,
-                    HallName = x.HallName,
-                    LocationType = x.LocationType,
-                    LocationName = x.LocationName,
-                    Capacity = x.Capacity,
-                    Description = x.Description,
-                    IsActive = x.IsActive
-                })
-                .ToListAsync(cancellationToken);
-
-            return Ok(new ApiResultDto<List<ConferenceHallDto>>
-            {
-                Success = true,
-                Message = "Conference halls retrieved successfully.",
-                Data = halls
-            });
+            _response = await _conferenceHallService.GetAll(activeOnly, cancellationToken);
+            return Ok(_response);
         }
 
         // GET: api/conference-halls/5
@@ -67,35 +47,10 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
             int id,
             CancellationToken cancellationToken)
         {
-            var hall = await _db.ConferenceHalls
-                .AsNoTracking()
-                .Where(x => x.ConferenceHallId == id)
-                .Select(x => new ConferenceHallDto
-                {
-                    ConferenceHallId = x.ConferenceHallId,
-                    HallCode = x.HallCode,
-                    HallName = x.HallName,
-                    LocationType = x.LocationType,
-                    LocationName = x.LocationName,
-                    Capacity = x.Capacity,
-                    Description = x.Description,
-                    IsActive = x.IsActive
-                })
-                .FirstOrDefaultAsync(cancellationToken);
+            _response = await _conferenceHallService.GetById(id, cancellationToken);
 
-            if (hall == null)
-                return NotFound(new ApiResultDto<object>
-                {
-                    Success = false,
-                    Message = "Conference hall not found."
-                });
-
-            return Ok(new ApiResultDto<ConferenceHallDto>
-            {
-                Success = true,
-                Message = "Conference hall retrieved successfully.",
-                Data = hall
-            });
+            return Ok(_response);
+            
         }
 
         // POST: api/conference-halls
@@ -105,56 +60,8 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
             [FromBody] CreateHallDto dto,
             CancellationToken cancellationToken)
         {
-            if (string.IsNullOrWhiteSpace(_currentUser.UserId))
-                return Unauthorized();
-
-            var code = dto.HallCode.Trim();
-
-            var exists = await _db.ConferenceHalls
-                .AnyAsync(x => x.HallCode == code, cancellationToken);
-
-            if (exists)
-                return Conflict(new ApiResultDto<object>
-                {
-                    Success = false,
-                    Message = "A conference hall with this code already exists."
-                });
-
-            var hall = new ConferenceHall
-            {
-                HallCode = code,
-                HallName = dto.HallName.Trim(),
-                LocationType = dto.LocationType,
-                LocationName = dto.LocationName.Trim(),
-                Capacity = dto.Capacity,
-                Description = dto.Description?.Trim(),
-                IsActive = true,
-                CreatedAtUtc = DateTime.UtcNow,
-                CreatedByUserId = _currentUser.UserId
-            };
-
-            _db.ConferenceHalls.Add(hall);
-            await _db.SaveChangesAsync(cancellationToken);
-
-            return CreatedAtAction(
-                nameof(GetById),
-                new { id = hall.ConferenceHallId },
-                new ApiResultDto<ConferenceHallDto>
-                {
-                    Success = true,
-                    Message = "Conference hall created successfully.",
-                    Data = new ConferenceHallDto
-                    {
-                        ConferenceHallId = hall.ConferenceHallId,
-                        HallCode = hall.HallCode,
-                        HallName = hall.HallName,
-                        LocationType = hall.LocationType,
-                        LocationName = hall.LocationName,
-                        Capacity = hall.Capacity,
-                        Description = hall.Description,
-                        IsActive = hall.IsActive
-                    }
-                });
+            _response = await _conferenceHallService.Create(dto, cancellationToken);
+            return Ok(_response);
         }
 
         // PUT: api/conference-halls/5
