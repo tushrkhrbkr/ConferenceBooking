@@ -13,15 +13,18 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
         private readonly IConferenceHallService _conferenceHallService;
         private readonly IFacilityService _facilityService;
         private readonly IVCPlatformService _vcPlatformService;
+        private readonly IHallMappingService _hallMappingService;
 
         public BookingAPIController(
             IConferenceHallService conferenceHallService,
             IFacilityService facilityService,
-            IVCPlatformService vcPlatformService)
+            IVCPlatformService vcPlatformService,
+            IHallMappingService hallMappingService)
         {
             _conferenceHallService = conferenceHallService;
             _facilityService = facilityService;
             _vcPlatformService = vcPlatformService;
+            _hallMappingService = hallMappingService;
         }
 
         // =========================================================
@@ -279,6 +282,134 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
         {
             var response = await _vcPlatformService.UnmapVCPlatformFromHall(
                 hallId, vcPlatformId, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // =========================================================
+        // HALL MANAGER MAPPING
+        // =========================================================
+
+        [HttpGet("{hallId:int}/managers")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> GetHallManagers(
+            int hallId, CancellationToken ct)
+        {
+            var response = await _hallMappingService.GetHallManagers(hallId, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("~/api/conference-halls/managers")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> AssignHallManager(
+            [FromBody] HallUserMappingDto dto, CancellationToken ct)
+        {
+            var response = await _hallMappingService.AssignHallManager(dto, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpDelete("{hallId:int}/managers/{userId}")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> RemoveHallManager(
+            int hallId, string userId, CancellationToken ct)
+        {
+            var response = await _hallMappingService.RemoveHallManager(hallId, userId, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // =========================================================
+        // SUB ADMIN MAPPING
+        // =========================================================
+
+        [HttpGet("{hallId:int}/sub-admins")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> GetHallSubAdmins(
+            int hallId, CancellationToken ct)
+        {
+            var response = await _hallMappingService.GetHallSubAdmins(hallId, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("~/api/conference-halls/sub-admins")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> AssignHallSubAdmin(
+            [FromBody] HallUserMappingDto dto, CancellationToken ct)
+        {
+            var response = await _hallMappingService.AssignHallSubAdmin(dto, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpDelete("{hallId:int}/sub-admins/{userId}")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> RemoveHallSubAdmin(
+            int hallId, string userId, CancellationToken ct)
+        {
+            var response = await _hallMappingService.RemoveHallSubAdmin(hallId, userId, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // =========================================================
+        // HALL - DEPARTMENT MAPPING
+        // =========================================================
+
+        [HttpGet("{hallId:int}/departments")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> GetHallDepartments(
+            int hallId, CancellationToken ct)
+        {
+            var response = await _hallMappingService.GetHallDepartments(hallId, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("~/api/conference-halls/departments")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> MapDepartmentToHall(
+            [FromBody] HallDepartmentMappingDto dto, CancellationToken ct)
+        {
+            var response = await _hallMappingService.MapDepartmentToHall(dto, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpDelete("{hallId:int}/departments/{departmentId:int}")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> RemoveDepartmentFromHall(
+            int hallId, int departmentId, CancellationToken ct)
+        {
+            var response = await _hallMappingService.RemoveDepartmentFromHall(
+                hallId, departmentId, ct);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // =========================================================
+        // REMOTE USER - HALL MAPPING
+        // =========================================================
+
+        [HttpGet("~/api/remote-users/{userId}/halls")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> GetRemoteUserHalls(
+            string userId, CancellationToken ct)
+        {
+            var response = await _hallMappingService.GetRemoteUserHalls(userId, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("~/api/remote-users/halls")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> MapRemoteUserToHall(
+            [FromBody] RemoteUserHallMappingDto dto, CancellationToken ct)
+        {
+            var response = await _hallMappingService.MapRemoteUserToHall(dto, ct);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpDelete("~/api/remote-users/{userId}/halls/{hallId:int}")]
+        [Authorize(Policy = "AdminOnly")]
+        public async Task<IActionResult> RemoveRemoteUserFromHall(
+            string userId, int hallId, CancellationToken ct)
+        {
+            var response = await _hallMappingService.RemoveRemoteUserFromHall(
+                hallId, userId, ct);
 
             return StatusCode(response.StatusCode, response);
         }

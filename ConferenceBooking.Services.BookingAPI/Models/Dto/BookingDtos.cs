@@ -61,6 +61,22 @@ namespace ConferenceBooking.Services.BookingAPI.Models.Dto
         public bool IsActive { get; set; } = true;
     }
 
+    public class RemoteUserHallMappingDto
+    {
+        [Required]
+        public string UserId { get; set; } = string.Empty;
+
+        [Required]
+        public int ConferenceHallId { get; set; }
+
+        [Required]
+        public DateTime EffectiveFromUtc { get; set; }
+
+        public DateTime? EffectiveToUtc { get; set; }
+
+        public bool IsPrimary { get; set; } = true;
+    }
+
     public class FacilityDto
     {
         public int FacilityId { get; set; }
