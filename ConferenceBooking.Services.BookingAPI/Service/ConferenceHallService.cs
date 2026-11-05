@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ConferenceBooking.Services.BookingAPI.Service
 {
-    public class ConferenceHallService: IConferenceHallService
+    public class ConferenceHallService : IConferenceHallService
     {
         private readonly ApplicationDbContext _db;
         private IMapper _mapper;
@@ -90,7 +90,7 @@ namespace ConferenceBooking.Services.BookingAPI.Service
             _response.IsSuccess = true;
             _response.Message = "Conference hall retrieved successfully.";
             _response.Result = hall;
-            
+
             return _response;
         }
 
@@ -139,7 +139,7 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
             return _response;
 
-             
+
         }
 
         public async Task<ResponseDto> Update(
@@ -151,13 +151,13 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                 _response.IsSuccess = false;
                 _response.Message = "Route ID and request ID do not match.";
                 return _response;
-                }
+            }
 
             if (string.IsNullOrWhiteSpace(_currentUser.UserId))
-                {
-                    _response.IsSuccess = false;
-                    _response.Message = "Unauthorized";
-                    return _response;
+            {
+                _response.IsSuccess = false;
+                _response.Message = "Unauthorized";
+                return _response;
             }
 
             var hall = await _db.ConferenceHalls
@@ -166,11 +166,11 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     cancellationToken);
 
             if (hall == null)
-                {
+            {
                 _response.IsSuccess = false;
                 _response.Message = "Conference hall not found.";
                 return _response;
-                }
+            }
 
             var code = dto.HallCode.Trim();
 
@@ -180,22 +180,22 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     cancellationToken);
 
             if (duplicate)
-                
-                {
+
+            {
                 _response.IsSuccess = false;
-                    _response.Message = "Another conference hall already uses this code.";
+                _response.Message = "Another conference hall already uses this code.";
                 return _response;
-                }
+            }
 
             // Optional optimistic concurrency check.
             if (dto.RowVersion is { Length: > 0 } &&
                 !hall.RowVersion.SequenceEqual(dto.RowVersion))
             {
-                
-                    _response.IsSuccess = false;
-                    _response.Message = "This hall was modified by another user. Reload and try again.";
-                    return _response;
-                
+
+                _response.IsSuccess = false;
+                _response.Message = "This hall was modified by another user. Reload and try again.";
+                return _response;
+
             }
 
             hall.HallCode = code;
@@ -210,11 +210,11 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
             await _db.SaveChangesAsync(cancellationToken);
 
-                _response.IsSuccess = true,
-                _response.Message = "Conference hall updated successfully.",
-                _response.Result = hall;
+            _response.IsSuccess = true;
+            _response.Message = "Conference hall updated successfully.";
+            _response.Result = hall;
             return _response;
-            
+
         }
     }
 }
