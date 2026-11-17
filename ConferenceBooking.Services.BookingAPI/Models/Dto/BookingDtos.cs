@@ -233,8 +233,8 @@ namespace ConferenceBooking.Services.BookingAPI.Models.Dto
         public int? VCPlatformId { get; set; }
         public string? VCPlatformName { get; set; }
         public string? VCInstructions { get; set; }
-        // Credentials are intentionally omitted. A separately authorized reveal workflow
-        // should be used if operational policy requires retrieval.
+        // Credentials are stored without encryption as explicitly decided.
+        // Never log or include them in ordinary booking responses.
     }
 
     public class BookingParticipantViewDto : BookingParticipantDto
@@ -534,5 +534,32 @@ namespace ConferenceBooking.Services.BookingAPI.Models.Dto
         public string Message { get; set; } = string.Empty;
         public T? Data { get; set; }
         public List<string> Errors { get; set; } = new();
+    }
+
+    public class BookingAvailabilityQueryDto
+    {
+        [Required]
+        public int ConferenceHallId { get; set; }
+
+        [Required]
+        public DateTime FromUtc { get; set; }
+
+        [Required]
+        public DateTime ToUtc { get; set; }
+
+        public long? ExcludeBookingId { get; set; }
+    }
+
+    public class BookingAvailabilityResultDto
+    {
+        public bool IsAvailable { get; set; }
+
+        public int ConferenceHallId { get; set; }
+
+        public DateTime FromUtc { get; set; }
+
+        public DateTime ToUtc { get; set; }
+
+        public List<string> Conflicts { get; set; } = new();
     }
 }

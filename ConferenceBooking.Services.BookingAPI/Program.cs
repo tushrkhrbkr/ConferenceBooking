@@ -26,6 +26,7 @@ builder.Services.AddScoped<IConferenceHallService, ConferenceHallService>();
 builder.Services.AddScoped<IFacilityService, FacilityService>();
 builder.Services.AddScoped<IVCPlatformService, VCPlatformService>();
 builder.Services.AddScoped<IHallMappingService, HallMappingService>();
+builder.Services.AddScoped<IBookingService, BookingService>();
 
 builder.Services.AddAuthorization(options =>
 {

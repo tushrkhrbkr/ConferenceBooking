@@ -14,17 +14,20 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
         private readonly IFacilityService _facilityService;
         private readonly IVCPlatformService _vcPlatformService;
         private readonly IHallMappingService _hallMappingService;
+        private readonly IBookingService _bookingService;
 
         public BookingAPIController(
             IConferenceHallService conferenceHallService,
             IFacilityService facilityService,
             IVCPlatformService vcPlatformService,
-            IHallMappingService hallMappingService)
+            IHallMappingService hallMappingService,
+            IBookingService bookingService)
         {
             _conferenceHallService = conferenceHallService;
             _facilityService = facilityService;
             _vcPlatformService = vcPlatformService;
             _hallMappingService = hallMappingService;
+            _bookingService = bookingService;
         }
 
         // =========================================================
@@ -413,5 +416,34 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
 
             return StatusCode(response.StatusCode, response);
         }
+
+        // =========================================================
+        // BOOKING APIs
+        // =========================================================
+
+        [HttpPost("~/api/bookings")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> CreateBooking(
+            [FromBody] CreateBookingDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingService.CreateBooking(
+                dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpGet("~/api/bookings/availability")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> CheckBookingAvailability(
+            [FromQuery] BookingAvailabilityQueryDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingService.CheckAvailability(
+                dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
     }
 }
