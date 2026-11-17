@@ -445,5 +445,63 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
             return StatusCode(response.StatusCode, response);
         }
 
+
+        [HttpGet("~/api/bookings/pending")]
+        [Authorize(Policy = "AdminOrSubAdmin")]
+        public async Task<IActionResult> GetPendingBookings(
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingService.GetPendingBookings(
+                cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPut("~/api/bookings/{id:long}/approve")]
+        [Authorize(Policy = "AdminOrSubAdmin")]
+        public async Task<IActionResult> ApproveBooking(
+            long id,
+            [FromBody] BookingDecisionDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            dto.BookingId = id;
+
+            var response = await _bookingService.ApproveBooking(
+                dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPut("~/api/bookings/{id:long}/reject")]
+        [Authorize(Policy = "AdminOrSubAdmin")]
+        public async Task<IActionResult> RejectBooking(
+            long id,
+            [FromBody] RejectBookingDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            dto.BookingId = id;
+
+            var response = await _bookingService.RejectBooking(
+                dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPut("~/api/bookings/{id:long}/cancel")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> CancelBooking(
+            long id,
+            [FromBody] CancelBookingDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            dto.BookingId = id;
+
+            var response = await _bookingService.CancelBooking(
+                dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+
     }
 }

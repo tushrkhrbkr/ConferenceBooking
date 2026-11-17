@@ -615,5 +615,540 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                 Message = message
             };
         }
+
+
+        public async Task<ResponseDto> GetPendingBookings(
+            CancellationToken cancellationToken = default)
+        {
+            if (!_currentUser.IsAuthenticated)
+                return Failure(401, "Authentication is required.");
+
+            if (!_currentUser.IsInRole("Admin") &&
+                !_currentUser.IsInRole("SUBADMIN"))
+                return Failure(403, "You are not authorized to view pending approvals.");
+
+            var query = from booking in _db.Bookings.AsNoTracking()
+                        join hall in _db.ConferenceHalls.AsNoTracking()
+                            on booking.ConferenceHallId equals hall.ConferenceHallId
+                        where booking.ApprovalStatus ==
+                            (byte)BookingApprovalStatus.Pending
+                        select new
+                        {
+                            booking.BookingId,
+                            booking.BookingReferenceNo,
+                            booking.ConferenceHallId,
+                            hall.HallName,
+                            booking.BookingDepartmentId,
+                            booking.RequestedByUserId,
+                            booking.ResponsiblePersonName,
+                            booking.ResponsiblePersonDesignation,
+                            booking.ResponsiblePersonMobile,
+                            booking.MeetingSubject,
+                            booking.ChairedBy,
+                            booking.MeetingStartUtc,
+                            booking.MeetingEndUtc,
+                            booking.SubmittedAtUtc
+                        };
+
+            // Sub Admin sees only bookings for assigned halls.
+            if (!_currentUser.IsInRole("Admin"))
+            {
+                var userId = _currentUser.UserId;
+
+                var assignedHallIds = _db.HallSubAdminMaps
+                    .Where(x => x.UserId == userId && x.IsActive)
+                    .Select(x => x.ConferenceHallId);
+
+                query = query.Where(x =>
+                    assignedHallIds.Contains(x.ConferenceHallId));
+            }
+
+            var result = await query
+                .OrderBy(x => x.MeetingStartUtc)
+                .ToListAsync(cancellationToken);
+
+            return new ResponseDto
+            {
+                IsSuccess = true,
+                StatusCode = 200,
+                Message = "Pending bookings retrieved successfully.",
+                Result = result
+            };
+        }
+
+        public async Task<ResponseDto> ApproveBooking(
+            BookingDecisionDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_currentUser.IsAuthenticated)
+                return Failure(401, "Authentication is required.");
+
+            var actorId = _currentUser.UserId;
+
+            await using var transaction =
+                await _db.Database.BeginTransactionAsync(
+                    IsolationLevel.ReadCommitted,
+                    cancellationToken);
+
+            try
+            {
+                var booking = await _db.Bookings.FirstOrDefaultAsync(
+                    x => x.BookingId == dto.BookingId,
+                    cancellationToken);
+
+                if (booking == null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(404, "Booking not found.");
+                }
+
+                var authorized = await CanManageHall(
+                    booking.ConferenceHallId,
+                    cancellationToken);
+
+                if (!authorized)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(403, "You are not authorized to approve bookings for this hall.");
+                }
+
+                if (booking.ApprovalStatus !=
+                    (byte)BookingApprovalStatus.Pending)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Only pending bookings can be approved.");
+                }
+
+                var lockResult = await AcquireHallLock(
+                    booking.ConferenceHallId,
+                    cancellationToken);
+
+                if (lockResult < 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Unable to acquire hall booking lock. Please retry.");
+                }
+
+                // Reload after acquiring the lock to avoid acting on stale state.
+                await _db.Entry(booking).ReloadAsync(cancellationToken);
+
+                if (booking.ApprovalStatus !=
+                    (byte)BookingApprovalStatus.Pending)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Booking status has changed. Refresh and retry.");
+                }
+
+                var occupiedEndUtc = booking.MeetingEndUtc.AddMinutes(
+                    booking.CoolingMinutes);
+
+                // Recheck other pending and approved bookings.
+                var bookingConflict = await _db.Bookings.AnyAsync(
+                    x => x.BookingId != booking.BookingId
+                         && x.ConferenceHallId == booking.ConferenceHallId
+                         && (x.ApprovalStatus ==
+                                (byte)BookingApprovalStatus.Pending ||
+                             x.ApprovalStatus ==
+                                (byte)BookingApprovalStatus.Approved)
+                         && booking.MeetingStartUtc <
+                            x.MeetingEndUtc.AddMinutes(x.CoolingMinutes)
+                         && occupiedEndUtc > x.MeetingStartUtc,
+                    cancellationToken);
+
+                if (bookingConflict)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Another booking now conflicts with this slot.");
+                }
+
+                var reservationConflict = await _db.HallReservations.AnyAsync(
+                    x => x.ConferenceHallId == booking.ConferenceHallId
+                         && x.ReservationStatus == (byte)ReservationStatus.Active
+                         && (!x.ExpiryAtUtc.HasValue ||
+                             x.ExpiryAtUtc > DateTime.UtcNow)
+                         && (!booking.ReservationOccurrenceId.HasValue ||
+                             x.ReservationOccurrenceId !=
+                             booking.ReservationOccurrenceId.Value)
+                         && booking.MeetingStartUtc < x.ReservationEndUtc
+                         && occupiedEndUtc > x.ReservationStartUtc,
+                    cancellationToken);
+
+                if (reservationConflict)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "The booking slot is now reserved.");
+                }
+
+                var holdConflict = await _db.HallSlotHolds.AnyAsync(
+                    x => x.ConferenceHallId == booking.ConferenceHallId
+                         && x.HoldStatus == (byte)SlotHoldStatus.Active
+                         && x.HoldExpiresAtUtc > DateTime.UtcNow
+                         && booking.MeetingStartUtc < x.HoldEndUtc
+                         && occupiedEndUtc > x.HoldStartUtc,
+                    cancellationToken);
+
+                if (holdConflict)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "The booking slot is currently held for modification.");
+                }
+
+                var oldStatus = booking.ApprovalStatus;
+                var now = DateTime.UtcNow;
+                var departmentId =
+                    await _currentUser.GetDepartmentIdAsync(cancellationToken);
+
+                booking.ApprovalStatus = (byte)BookingApprovalStatus.Approved;
+                booking.ApprovedByUserId = actorId;
+                booking.ApprovedAtUtc = now;
+                booking.UpdatedAtUtc = now;
+                booking.UpdatedByUserId = actorId;
+
+                _db.BookingStatusHistory.Add(new BookingStatusHistory
+                {
+                    BookingId = booking.BookingId,
+                    OldApprovalStatus = oldStatus,
+                    NewApprovalStatus = booking.ApprovalStatus,
+                    OldMeetingStatus = booking.MeetingStatus,
+                    NewMeetingStatus = booking.MeetingStatus,
+                    ChangedByUserId = actorId,
+                    RepresentedDepartmentId = departmentId,
+                    Remarks = dto.Remarks ?? "Booking approved.",
+                    ChangedAtUtc = now
+                });
+
+                _db.BookingAuditLogs.Add(new BookingAuditLog
+                {
+                    EntityType = "Booking",
+                    EntityId = booking.BookingId,
+                    ActionType = "BookingApproved",
+                    PerformedByUserId = actorId,
+                    RepresentedDepartmentId = departmentId,
+                    OldValuesJson = System.Text.Json.JsonSerializer.Serialize(
+                        new { ApprovalStatus = oldStatus }),
+                    NewValuesJson = System.Text.Json.JsonSerializer.Serialize(
+                        new { ApprovalStatus = booking.ApprovalStatus }),
+                    Remarks = dto.Remarks ?? "Booking approved.",
+                    CreatedAtUtc = now
+                });
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+
+                return new ResponseDto
+                {
+                    IsSuccess = true,
+                    StatusCode = 200,
+                    Message = "Booking approved successfully.",
+                    Result = new
+                    {
+                        booking.BookingId,
+                        booking.BookingReferenceNo,
+                        booking.ApprovalStatus,
+                        booking.ApprovedByUserId,
+                        booking.ApprovedAtUtc
+                    }
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Failure(500, "An unexpected error occurred while approving the booking.");
+            }
+        }
+
+        public async Task<ResponseDto> RejectBooking(
+            RejectBookingDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_currentUser.IsAuthenticated)
+                return Failure(401, "Authentication is required.");
+
+            if (string.IsNullOrWhiteSpace(dto.RejectionReason))
+                return Failure(400, "Rejection reason is compulsory.");
+
+            var actorId = _currentUser.UserId;
+
+            await using var transaction =
+                await _db.Database.BeginTransactionAsync(
+                    IsolationLevel.ReadCommitted,
+                    cancellationToken);
+
+            try
+            {
+                var booking = await _db.Bookings.FirstOrDefaultAsync(
+                    x => x.BookingId == dto.BookingId,
+                    cancellationToken);
+
+                if (booking == null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(404, "Booking not found.");
+                }
+
+                if (!await CanManageHall(
+                    booking.ConferenceHallId, cancellationToken))
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(403, "You are not authorized to reject bookings for this hall.");
+                }
+
+                var lockResult = await AcquireHallLock(
+                    booking.ConferenceHallId,
+                    cancellationToken);
+
+                if (lockResult < 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Unable to acquire hall booking lock. Please retry.");
+                }
+
+                await _db.Entry(booking).ReloadAsync(cancellationToken);
+
+                if (booking.ApprovalStatus !=
+                    (byte)BookingApprovalStatus.Pending)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Only pending bookings can be rejected.");
+                }
+
+                var oldStatus = booking.ApprovalStatus;
+                var now = DateTime.UtcNow;
+                var departmentId =
+                    await _currentUser.GetDepartmentIdAsync(cancellationToken);
+
+                booking.ApprovalStatus = (byte)BookingApprovalStatus.Rejected;
+                booking.RejectionReason = dto.RejectionReason.Trim();
+                booking.UpdatedAtUtc = now;
+                booking.UpdatedByUserId = actorId;
+
+                _db.BookingStatusHistory.Add(new BookingStatusHistory
+                {
+                    BookingId = booking.BookingId,
+                    OldApprovalStatus = oldStatus,
+                    NewApprovalStatus = booking.ApprovalStatus,
+                    OldMeetingStatus = booking.MeetingStatus,
+                    NewMeetingStatus = booking.MeetingStatus,
+                    ChangedByUserId = actorId,
+                    RepresentedDepartmentId = departmentId,
+                    Remarks = booking.RejectionReason,
+                    ChangedAtUtc = now
+                });
+
+                _db.BookingAuditLogs.Add(new BookingAuditLog
+                {
+                    EntityType = "Booking",
+                    EntityId = booking.BookingId,
+                    ActionType = "BookingRejected",
+                    PerformedByUserId = actorId,
+                    RepresentedDepartmentId = departmentId,
+                    OldValuesJson = System.Text.Json.JsonSerializer.Serialize(
+                        new { ApprovalStatus = oldStatus }),
+                    NewValuesJson = System.Text.Json.JsonSerializer.Serialize(
+                        new
+                        {
+                            ApprovalStatus = booking.ApprovalStatus,
+                            booking.RejectionReason
+                        }),
+                    Remarks = dto.Remarks ?? booking.RejectionReason,
+                    CreatedAtUtc = now
+                });
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+
+                return new ResponseDto
+                {
+                    IsSuccess = true,
+                    StatusCode = 200,
+                    Message = "Booking rejected successfully.",
+                    Result = new
+                    {
+                        booking.BookingId,
+                        booking.BookingReferenceNo,
+                        booking.ApprovalStatus,
+                        booking.RejectionReason
+                    }
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Failure(500, "An unexpected error occurred while rejecting the booking.");
+            }
+        }
+
+        public async Task<ResponseDto> CancelBooking(
+            CancelBookingDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_currentUser.IsAuthenticated)
+                return Failure(401, "Authentication is required.");
+
+            if (string.IsNullOrWhiteSpace(dto.CancellationReason))
+                return Failure(400, "Cancellation reason is compulsory.");
+
+            var actorId = _currentUser.UserId;
+
+            await using var transaction =
+                await _db.Database.BeginTransactionAsync(
+                    IsolationLevel.ReadCommitted,
+                    cancellationToken);
+
+            try
+            {
+                var booking = await _db.Bookings.FirstOrDefaultAsync(
+                    x => x.BookingId == dto.BookingId,
+                    cancellationToken);
+
+                if (booking == null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(404, "Booking not found.");
+                }
+
+                var isAdmin = _currentUser.IsInRole("Admin");
+                var isRequester = booking.RequestedByUserId == actorId;
+
+                var isSubAdmin = await IsAssignedSubAdmin(
+                    booking.ConferenceHallId, cancellationToken);
+
+                if (!isAdmin && !isRequester && !isSubAdmin)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(403, "You are not authorized to cancel this booking.");
+                }
+
+                var lockResult = await AcquireHallLock(
+                    booking.ConferenceHallId,
+                    cancellationToken);
+
+                if (lockResult < 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Unable to acquire hall booking lock. Please retry.");
+                }
+
+                await _db.Entry(booking).ReloadAsync(cancellationToken);
+
+                if (booking.ApprovalStatus !=
+                        (byte)BookingApprovalStatus.Pending &&
+                    booking.ApprovalStatus !=
+                        (byte)BookingApprovalStatus.Approved)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Only pending or approved bookings can be cancelled.");
+                }
+
+                var oldStatus = booking.ApprovalStatus;
+                var now = DateTime.UtcNow;
+                var departmentId =
+                    await _currentUser.GetDepartmentIdAsync(cancellationToken);
+
+                booking.ApprovalStatus = (byte)BookingApprovalStatus.Cancelled;
+                booking.CancelledByUserId = actorId;
+                booking.CancelledAtUtc = now;
+                booking.CancellationReason = dto.CancellationReason.Trim();
+                booking.UpdatedAtUtc = now;
+                booking.UpdatedByUserId = actorId;
+
+                _db.BookingStatusHistory.Add(new BookingStatusHistory
+                {
+                    BookingId = booking.BookingId,
+                    OldApprovalStatus = oldStatus,
+                    NewApprovalStatus = booking.ApprovalStatus,
+                    OldMeetingStatus = booking.MeetingStatus,
+                    NewMeetingStatus = booking.MeetingStatus,
+                    ChangedByUserId = actorId,
+                    RepresentedDepartmentId = departmentId,
+                    Remarks = booking.CancellationReason,
+                    ChangedAtUtc = now
+                });
+
+                _db.BookingAuditLogs.Add(new BookingAuditLog
+                {
+                    EntityType = "Booking",
+                    EntityId = booking.BookingId,
+                    ActionType = "BookingCancelled",
+                    PerformedByUserId = actorId,
+                    RepresentedDepartmentId = departmentId,
+                    OldValuesJson = System.Text.Json.JsonSerializer.Serialize(
+                        new { ApprovalStatus = oldStatus }),
+                    NewValuesJson = System.Text.Json.JsonSerializer.Serialize(
+                        new
+                        {
+                            ApprovalStatus = booking.ApprovalStatus,
+                            booking.CancellationReason
+                        }),
+                    Remarks = booking.CancellationReason,
+                    CreatedAtUtc = now
+                });
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+
+                return new ResponseDto
+                {
+                    IsSuccess = true,
+                    StatusCode = 200,
+                    Message = "Booking cancelled successfully.",
+                    Result = new
+                    {
+                        booking.BookingId,
+                        booking.BookingReferenceNo,
+                        booking.ApprovalStatus,
+                        booking.CancellationReason
+                    }
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Failure(500, "An unexpected error occurred while cancelling the booking.");
+            }
+        }
+
+        private async Task<bool> CanManageHall(
+            int hallId,
+            CancellationToken cancellationToken)
+        {
+            if (_currentUser.IsInRole("Admin"))
+                return true;
+
+            return await IsAssignedSubAdmin(hallId, cancellationToken);
+        }
+
+        private async Task<bool> IsAssignedSubAdmin(
+            int hallId,
+            CancellationToken cancellationToken)
+        {
+            if (!_currentUser.IsInRole("SUBADMIN"))
+                return false;
+
+            var userId = _currentUser.UserId;
+            var now = DateTime.UtcNow;
+
+            return await _db.HallSubAdminMaps.AnyAsync(
+                x => x.ConferenceHallId == hallId
+                     && x.UserId == userId
+                     && x.IsActive
+                     && x.EffectiveFromUtc <= now
+                     && (!x.EffectiveToUtc.HasValue ||
+                         x.EffectiveToUtc >= now),
+                cancellationToken);
+        }
+
     }
 }

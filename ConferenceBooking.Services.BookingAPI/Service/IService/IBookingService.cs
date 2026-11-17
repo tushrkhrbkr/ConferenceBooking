@@ -11,5 +11,20 @@ namespace ConferenceBooking.Services.BookingAPI.Service.IService
         Task<ResponseDto> CheckAvailability(
             BookingAvailabilityQueryDto dto,
             CancellationToken cancellationToken = default);
+
+        Task<ResponseDto> GetPendingBookings(
+    CancellationToken cancellationToken = default);
+
+        Task<ResponseDto> ApproveBooking(
+            BookingDecisionDto dto,
+            CancellationToken cancellationToken = default);
+
+        Task<ResponseDto> RejectBooking(
+            RejectBookingDto dto,
+            CancellationToken cancellationToken = default);
+
+        Task<ResponseDto> CancelBooking(
+            CancelBookingDto dto,
+            CancellationToken cancellationToken = default);
     }
 }
