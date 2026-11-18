@@ -1324,6 +1324,138 @@ namespace ConferenceBooking.Services.BookingAPI.Service
         }
 
 
+        public async Task<int> ExpirePendingRequests(
+            CancellationToken cancellationToken = default)
+        {
+            var now = DateTime.UtcNow;
+
+            var expiredRequestIds = await _db.BookingModificationRequests
+                .AsNoTracking()
+                .Where(x =>
+                    x.ModificationStatus == (byte)ModificationStatus.Pending &&
+                    x.HoldExpiresAtUtc <= now)
+                .OrderBy(x => x.HoldExpiresAtUtc)
+                .Select(x => x.ModificationRequestId)
+                .Take(100)
+                .ToListAsync(cancellationToken);
+
+            var expiredCount = 0;
+
+            foreach (var requestId in expiredRequestIds)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                await using var transaction =
+                    await _db.Database.BeginTransactionAsync(
+                        IsolationLevel.ReadCommitted,
+                        cancellationToken);
+
+                try
+                {
+                    var request = await _db.BookingModificationRequests
+                        .FirstOrDefaultAsync(
+                            x => x.ModificationRequestId == requestId,
+                            cancellationToken);
+
+                    if (request == null ||
+                        request.ModificationStatus !=
+                            (byte)ModificationStatus.Pending ||
+                        request.HoldExpiresAtUtc > DateTime.UtcNow)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        continue;
+                    }
+
+                    // Use the same lock resource as booking submission,
+                    // approval, rejection and withdrawal.
+                    var lockResult = await AcquireHallLock(
+                        request.ProposedHallId,
+                        cancellationToken);
+
+                    if (lockResult < 0)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        continue;
+                    }
+
+                    // Recheck after acquiring the lock.
+                    await _db.Entry(request).ReloadAsync(cancellationToken);
+
+                    if (request.ModificationStatus !=
+                            (byte)ModificationStatus.Pending ||
+                        request.HoldExpiresAtUtc > DateTime.UtcNow)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        continue;
+                    }
+
+                    var currentTime = DateTime.UtcNow;
+
+                    request.ModificationStatus =
+                        (byte)ModificationStatus.Expired;
+
+                    request.ReviewedAtUtc = currentTime;
+                    request.ReviewRemarks =
+                        "Automatically expired because the modification hold period elapsed.";
+
+                    var activeHolds = await _db.HallSlotHolds
+                        .Where(x =>
+                            x.ModificationRequestId == requestId &&
+                            x.HoldStatus == (byte)SlotHoldStatus.Active)
+                        .ToListAsync(cancellationToken);
+
+                    foreach (var hold in activeHolds)
+                    {
+                        hold.HoldStatus = (byte)SlotHoldStatus.Expired;
+                        hold.ReleasedAtUtc = currentTime;
+                    }
+
+                    _db.BookingAuditLogs.Add(new BookingAuditLog
+                    {
+                        EntityType = "BookingModification",
+                        EntityId = request.ModificationRequestId,
+                        ActionType = "ModificationExpired",
+                        PerformedByUserId = "SYSTEM",
+                        RepresentedDepartmentId =
+                            request.RequestedByDepartmentId,
+                        OldValuesJson = System.Text.Json.JsonSerializer.Serialize(
+                            new
+                            {
+                                ModificationStatus =
+                                    (byte)ModificationStatus.Pending
+                            }),
+                        NewValuesJson = System.Text.Json.JsonSerializer.Serialize(
+                            new
+                            {
+                                ModificationStatus =
+                                    (byte)ModificationStatus.Expired,
+                                ExpiredAtUtc = currentTime,
+                                ReleasedHoldCount = activeHolds.Count
+                            }),
+                        Remarks = "Modification request expired automatically.",
+                        CreatedAtUtc = currentTime
+                    });
+
+                    await _db.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+
+                    expiredCount++;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }
+
+            return expiredCount;
+        }
+
+
         private async Task<int> AcquireHallLock(
             int hallId,
             CancellationToken cancellationToken)

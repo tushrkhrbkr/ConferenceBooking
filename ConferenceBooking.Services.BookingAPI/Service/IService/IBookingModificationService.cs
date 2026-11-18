@@ -31,5 +31,8 @@ namespace ConferenceBooking.Services.BookingAPI.Service.IService
             long modificationRequestId,
             ModificationReviewDto dto,
             CancellationToken cancellationToken = default);
+
+        Task<int> ExpirePendingRequests(
+    CancellationToken cancellationToken = default);
     }
 }
