@@ -977,6 +977,7 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     }
                 }
 
+
                 // null snapshot = retain existing facilities.
                 // [] snapshot = remove all existing facilities.
                 if (request.ProposedFacilitiesJson != null)
@@ -1026,6 +1027,41 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                         });
                     }
                 }
+
+                else
+                {
+                    // No replacement facility snapshot was submitted.
+                    // Validate that all currently assigned facilities remain
+                    // available in the proposed hall.
+
+                    var retainedFacilityIds = await _db.BookingFacilityMaps
+                        .Where(x => x.BookingId == booking.BookingId)
+                        .Select(x => x.FacilityId)
+                        .Distinct()
+                        .ToListAsync(cancellationToken);
+
+                    if (retainedFacilityIds.Count > 0)
+                    {
+                        var availableFacilityIds = await _db.HallFacilityMaps
+                            .Where(x =>
+                                x.ConferenceHallId == request.ProposedHallId &&
+                                x.IsAvailable &&
+                                retainedFacilityIds.Contains(x.FacilityId))
+                            .Select(x => x.FacilityId)
+                            .Distinct()
+                            .ToListAsync(cancellationToken);
+
+                        if (availableFacilityIds.Count != retainedFacilityIds.Count)
+                        {
+                            await transaction.RollbackAsync(cancellationToken);
+
+                            return Failure(
+                                409,
+                                "One or more existing booking facilities are unavailable in the proposed hall. Please submit a new modification request with compatible facilities.");
+                        }
+                    }
+                }
+
 
                 // VC snapshot is UTF-8 JSON, not encrypted.
                 // Credentials are never returned, logged or audited.
@@ -1099,6 +1135,38 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
                     vcDetails.UpdatedAtUtc = now;
                 }
+
+                else
+                {
+                    // No replacement VC snapshot was submitted.
+                    // Ensure the existing VC platform is supported by the proposed hall.
+
+                    var existingVCDetails = await _db.BookingVCDetails
+                        .FirstOrDefaultAsync(
+                            x => x.BookingId == booking.BookingId,
+                            cancellationToken);
+
+                    if (existingVCDetails != null)
+                    {
+                        var existingPlatformAvailable =
+                            await _db.HallVCPlatformMaps.AnyAsync(
+                                x =>
+                                    x.ConferenceHallId == request.ProposedHallId &&
+                                    x.VCPlatformId == existingVCDetails.VCPlatformId &&
+                                    x.IsActive,
+                                cancellationToken);
+
+                        if (!existingPlatformAvailable)
+                        {
+                            await transaction.RollbackAsync(cancellationToken);
+
+                            return Failure(
+                                409,
+                                "The existing VC platform is unavailable in the proposed hall. Please submit a new modification request with a compatible VC platform.");
+                        }
+                    }
+                }
+
 
                 var departmentId =
                     await _currentUser.GetDepartmentIdAsync(cancellationToken);
