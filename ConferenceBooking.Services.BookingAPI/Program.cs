@@ -28,6 +28,7 @@ builder.Services.AddScoped<IVCPlatformService, VCPlatformService>();
 builder.Services.AddScoped<IHallMappingService, HallMappingService>();
 builder.Services.AddScoped<IBookingService, BookingService>();
 builder.Services.AddScoped<IBookingModificationService, BookingModificationService>();
+builder.Services.AddHostedService<ModificationExpiryWorker>();
 
 builder.Services.AddAuthorization(options =>
 {
