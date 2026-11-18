@@ -90,21 +90,27 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             return eventType switch
             {
                 "PasswordResetOtp" => "PASSWORD_RESET_OTP",
-
                 "RegistrationRequested" => "REGISTRATION_REQUESTED",
-
                 "RegistrationApproved" => "REGISTRATION_APPROVED",
-
                 "RegistrationRejected" => "REGISTRATION_REJECTED",
-
                 "PasswordResetSuccess" => "PASSWORD_RESET_SUCCESS",
-
                 "PasswordChanged" => "PASSWORD_CHANGED",
+
+                "BookingSubmitted" => "BOOKING_SUBMITTED",
+                "BookingApproved" => "BOOKING_APPROVED",
+                "BookingRejected" => "BOOKING_REJECTED",
+                "BookingCancelled" => "BOOKING_CANCELLED",
+
+                "ModificationSubmitted" => "MODIFICATION_SUBMITTED",
+                "ModificationWithdrawn" => "MODIFICATION_WITHDRAWN",
+                "ModificationApproved" => "MODIFICATION_APPROVED",
+                "ModificationRejected" => "MODIFICATION_REJECTED",
 
                 _ => throw new NotSupportedException(
                     $"Unsupported email event type: {eventType}")
             };
         }
+
 
         private static Dictionary<string, string> BuildReplacements(EmailNotificationOutbox notification)
         {
@@ -256,6 +262,21 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                         break;
                     }
 
+
+
+                case "BookingSubmitted":
+                case "BookingApproved":
+                case "BookingRejected":
+                case "BookingCancelled":
+                case "ModificationSubmitted":
+                case "ModificationWithdrawn":
+                case "ModificationApproved":
+                case "ModificationRejected":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
                 default:
                     throw new NotSupportedException(
                         $"Unsupported email event type: {notification.EventType}");
@@ -401,5 +422,35 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             if (string.IsNullOrWhiteSpace(_emailSettings.FromEmail))
                 throw new InvalidOperationException("Sender email is not configured.");
         }
+
+
+        private static void AddBookingLifecycleReplacements(
+            EmailNotificationOutbox notification,
+            Dictionary<string, string> replacements)
+        {
+            var payload =
+                JsonSerializer.Deserialize<BookingLifecycleEmailDto>(
+                    notification.PayloadJson,
+                    JsonOptions);
+
+            if (payload == null ||
+                string.IsNullOrWhiteSpace(payload.RecipientName) ||
+                string.IsNullOrWhiteSpace(payload.BookingReference))
+            {
+                throw new InvalidOperationException(
+                    $"Invalid payload for email event '{notification.EventType}'.");
+            }
+
+            replacements["RecipientName"] = payload.RecipientName;
+            replacements["RequesterName"] = payload.RequesterName;
+            replacements["BookingReference"] = payload.BookingReference;
+            replacements["MeetingSubject"] = payload.MeetingSubject;
+            replacements["HallName"] = payload.HallName;
+            replacements["MeetingStart"] = payload.MeetingStart;
+            replacements["MeetingEnd"] = payload.MeetingEnd;
+            replacements["ActionBy"] = payload.ActionBy;
+            replacements["Remarks"] = payload.Remarks;
+        }
+
     }
 }
