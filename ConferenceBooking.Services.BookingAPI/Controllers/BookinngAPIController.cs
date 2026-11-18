@@ -548,5 +548,59 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
             return StatusCode(response.StatusCode, response);
         }
 
+
+        // GET: api/bookings/modifications/pending
+        [HttpGet("~/api/bookings/modifications/pending")]
+        [Authorize(Policy = "AdminOrSubAdmin")]
+        public async Task<IActionResult> GetPendingModifications(
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingModificationService.GetPendingRequests(
+                cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // GET: api/bookings/modifications/15
+        [HttpGet("~/api/bookings/modifications/{id:long}")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> GetModificationById(
+            long id,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingModificationService.GetRequestById(
+                id, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // PUT: api/bookings/modifications/15/approve
+        [HttpPut("~/api/bookings/modifications/{id:long}/approve")]
+        [Authorize(Policy = "AdminOrSubAdmin")]
+        public async Task<IActionResult> ApproveModification(
+            long id,
+            [FromBody] ModificationReviewDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingModificationService.Approve(
+                id, dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // PUT: api/bookings/modifications/15/reject
+        [HttpPut("~/api/bookings/modifications/{id:long}/reject")]
+        [Authorize(Policy = "AdminOrSubAdmin")]
+        public async Task<IActionResult> RejectModification(
+            long id,
+            [FromBody] ModificationReviewDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingModificationService.Reject(
+                id, dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
     }
 }

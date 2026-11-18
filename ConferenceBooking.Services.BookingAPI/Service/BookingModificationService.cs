@@ -539,6 +539,791 @@ namespace ConferenceBooking.Services.BookingAPI.Service
             }
         }
 
+
+        public async Task<ResponseDto> GetPendingRequests(
+            CancellationToken cancellationToken = default)
+        {
+            if (!_currentUser.IsAuthenticated)
+                return Failure(401, "Authentication is required.");
+
+            var isAdmin = _currentUser.IsInRole("Admin");
+
+            if (!isAdmin && !_currentUser.IsInRole("SUBADMIN"))
+                return Failure(403, "You are not authorized to view pending modifications.");
+
+            var now = DateTime.UtcNow;
+
+            var query = _db.BookingModificationRequests
+                .AsNoTracking()
+                .Where(x =>
+                    x.ModificationStatus == (byte)ModificationStatus.Pending &&
+                    x.HoldExpiresAtUtc > now);
+
+            if (!isAdmin)
+            {
+                var userId = _currentUser.UserId;
+
+                var assignedHalls = _db.HallSubAdminMaps
+                    .Where(x =>
+                        x.UserId == userId &&
+                        x.IsActive &&
+                        x.EffectiveFromUtc <= now &&
+                        (!x.EffectiveToUtc.HasValue ||
+                         x.EffectiveToUtc >= now))
+                    .Select(x => x.ConferenceHallId);
+
+                query = query.Where(x =>
+                    assignedHalls.Contains(x.ProposedHallId) &&
+                    _db.Bookings.Any(b =>
+                        b.BookingId == x.BookingId &&
+                        assignedHalls.Contains(b.ConferenceHallId)));
+            }
+
+            var result = await query
+                .OrderBy(x => x.HoldExpiresAtUtc)
+                .Select(x => new
+                {
+                    x.ModificationRequestId,
+                    x.BookingId,
+                    x.RequestedByUserId,
+                    x.RequestedByDepartmentId,
+                    x.ProposedHallId,
+                    x.ProposedStartUtc,
+                    x.ProposedEndUtc,
+                    x.ProposedSubject,
+                    x.ChangeReason,
+                    x.ModificationStatus,
+                    x.CreatedAtUtc,
+                    x.HoldExpiresAtUtc,
+                    OriginalHallId = _db.Bookings
+                        .Where(b => b.BookingId == x.BookingId)
+                        .Select(b => b.ConferenceHallId)
+                        .FirstOrDefault(),
+                    OriginalStartUtc = _db.Bookings
+                        .Where(b => b.BookingId == x.BookingId)
+                        .Select(b => b.MeetingStartUtc)
+                        .FirstOrDefault(),
+                    OriginalEndUtc = _db.Bookings
+                        .Where(b => b.BookingId == x.BookingId)
+                        .Select(b => b.MeetingEndUtc)
+                        .FirstOrDefault()
+                })
+                .ToListAsync(cancellationToken);
+
+            return new ResponseDto
+            {
+                IsSuccess = true,
+                StatusCode = 200,
+                Message = "Pending modification requests retrieved successfully.",
+                Result = result
+            };
+        }
+
+        public async Task<ResponseDto> GetRequestById(
+            long modificationRequestId,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_currentUser.IsAuthenticated)
+                return Failure(401, "Authentication is required.");
+
+            var request = await _db.BookingModificationRequests
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.ModificationRequestId == modificationRequestId,
+                    cancellationToken);
+
+            if (request == null)
+                return Failure(404, "Modification request not found.");
+
+            var booking = await _db.Bookings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.BookingId == request.BookingId,
+                    cancellationToken);
+
+            if (booking == null)
+                return Failure(404, "Associated booking not found.");
+
+            var isAdmin = _currentUser.IsInRole("Admin");
+            var isRequester = request.RequestedByUserId == _currentUser.UserId;
+
+            var canReview = isAdmin ||
+                (await IsAssignedSubAdmin(
+                    booking.ConferenceHallId, cancellationToken) &&
+                 await IsAssignedSubAdmin(
+                    request.ProposedHallId, cancellationToken));
+
+            if (!isRequester && !canReview)
+                return Failure(403, "You are not authorized to view this request.");
+
+            // Do not return the VC credential snapshot.
+            return new ResponseDto
+            {
+                IsSuccess = true,
+                StatusCode = 200,
+                Message = "Modification request retrieved successfully.",
+                Result = new
+                {
+                    request.ModificationRequestId,
+                    request.BookingId,
+                    request.RequestedByUserId,
+                    request.RequestedByDepartmentId,
+                    request.ProposedHallId,
+                    request.ProposedStartUtc,
+                    request.ProposedEndUtc,
+                    request.ProposedSubject,
+                    request.ProposedChairedBy,
+                    request.ProposedContactName,
+                    request.ProposedContactDesignation,
+                    request.ProposedContactMobile,
+                    ProposedParticipants = request.ProposedParticipantsJson,
+                    ProposedFacilities = request.ProposedFacilitiesJson,
+                    HasProposedVCDetails =
+                        request.ProposedVCDetailsEncrypted != null,
+                    request.ChangeReason,
+                    request.ModificationStatus,
+                    request.HoldExpiresAtUtc,
+                    request.ReviewRemarks,
+                    OriginalBooking = new
+                    {
+                        booking.ConferenceHallId,
+                        booking.MeetingStartUtc,
+                        booking.MeetingEndUtc,
+                        booking.MeetingSubject,
+                        booking.ChairedBy,
+                        booking.ResponsiblePersonName,
+                        booking.ResponsiblePersonDesignation,
+                        booking.ResponsiblePersonMobile
+                    }
+                }
+            };
+        }
+
+        public async Task<ResponseDto> Approve(
+            long modificationRequestId,
+            ModificationReviewDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_currentUser.IsAuthenticated)
+                return Failure(401, "Authentication is required.");
+
+            var actorId = _currentUser.UserId;
+            var isAdmin = _currentUser.IsInRole("Admin");
+
+            await using var transaction =
+                await _db.Database.BeginTransactionAsync(
+                    IsolationLevel.ReadCommitted, cancellationToken);
+
+            try
+            {
+                var request = await _db.BookingModificationRequests
+                    .FirstOrDefaultAsync(
+                        x => x.ModificationRequestId == modificationRequestId,
+                        cancellationToken);
+
+                if (request == null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(404, "Modification request not found.");
+                }
+
+                var booking = await _db.Bookings
+                    .FirstOrDefaultAsync(
+                        x => x.BookingId == request.BookingId,
+                        cancellationToken);
+
+                if (booking == null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(404, "Associated booking not found.");
+                }
+
+                if (!isAdmin)
+                {
+                    var canManageOriginal = await IsAssignedSubAdmin(
+                        booking.ConferenceHallId, cancellationToken);
+
+                    var canManageProposed = await IsAssignedSubAdmin(
+                        request.ProposedHallId, cancellationToken);
+
+                    if (!canManageOriginal || !canManageProposed)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return Failure(403,
+                            "You must be assigned SubAdmin for both the original and proposed halls.");
+                    }
+                }
+
+                var hallIds = new[]
+                {
+            booking.ConferenceHallId,
+            request.ProposedHallId
+        }.Distinct().OrderBy(x => x).ToArray();
+
+                foreach (var hallId in hallIds)
+                {
+                    var lockResult = await AcquireHallLock(
+                        hallId, cancellationToken);
+
+                    if (lockResult < 0)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return Failure(409,
+                            "Unable to acquire hall booking lock. Please retry.");
+                    }
+                }
+
+                await _db.Entry(request).ReloadAsync(cancellationToken);
+                await _db.Entry(booking).ReloadAsync(cancellationToken);
+
+                var now = DateTime.UtcNow;
+
+                if (request.ModificationStatus !=
+                    (byte)ModificationStatus.Pending)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "This modification request is no longer pending.");
+                }
+
+                if (request.HoldExpiresAtUtc <= now)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "The modification request has expired. It cannot be approved.");
+                }
+
+                if (booking.ApprovalStatus !=
+                        (byte)BookingApprovalStatus.Approved ||
+                    booking.MeetingStatus != (byte)MeetingStatus.NotStarted ||
+                    booking.MeetingStartUtc <= now)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409,
+                        "The original booking is no longer eligible for modification.");
+                }
+
+                var hold = await _db.HallSlotHolds
+                    .FirstOrDefaultAsync(
+                        x => x.ModificationRequestId == modificationRequestId &&
+                             x.HoldStatus == (byte)SlotHoldStatus.Active &&
+                             x.HoldExpiresAtUtc > now,
+                        cancellationToken);
+
+                if (hold == null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "The proposed slot hold is no longer active.");
+                }
+
+                var proposedHall = await _db.ConferenceHalls
+                    .AnyAsync(
+                        x => x.ConferenceHallId == request.ProposedHallId &&
+                             x.IsActive,
+                        cancellationToken);
+
+                if (!proposedHall)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "The proposed hall is no longer active.");
+                }
+
+                var coolingMinutes = booking.CoolingMinutes > 0
+                    ? booking.CoolingMinutes
+                    : DefaultCoolingMinutes;
+
+                var occupiedEnd = request.ProposedEndUtc
+                    .AddMinutes(coolingMinutes);
+
+                if (booking.ReservationOccurrenceId.HasValue)
+                {
+                    var occurrence = await _db.ReservationOccurrences
+                        .FirstOrDefaultAsync(
+                            x => x.ReservationOccurrenceId ==
+                                 booking.ReservationOccurrenceId.Value &&
+                                 x.OccurrenceStatus ==
+                                 (byte)ReservationOccurrenceStatus.Booked,
+                            cancellationToken);
+
+                    if (occurrence == null ||
+                        occurrence.ConferenceHallId != request.ProposedHallId ||
+                        request.ProposedStartUtc < occurrence.OccurrenceStartUtc ||
+                        occupiedEnd > occurrence.OccurrenceEndUtc)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return Failure(409,
+                            "The proposed period is outside the original reservation.");
+                    }
+                }
+
+                var bookingConflict = await _db.Bookings.AnyAsync(
+                    x => x.BookingId != booking.BookingId &&
+                         x.ConferenceHallId == request.ProposedHallId &&
+                         (x.ApprovalStatus ==
+                              (byte)BookingApprovalStatus.Pending ||
+                          x.ApprovalStatus ==
+                              (byte)BookingApprovalStatus.Approved) &&
+                         request.ProposedStartUtc <
+                            x.MeetingEndUtc.AddMinutes(x.CoolingMinutes) &&
+                         occupiedEnd > x.MeetingStartUtc,
+                    cancellationToken);
+
+                if (bookingConflict)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "The proposed slot now conflicts with another booking.");
+                }
+
+                var reservationConflict = await _db.HallReservations.AnyAsync(
+                    x => x.ConferenceHallId == request.ProposedHallId &&
+                         x.ReservationStatus == (byte)ReservationStatus.Active &&
+                         (!x.ExpiryAtUtc.HasValue || x.ExpiryAtUtc > now) &&
+                         (!booking.ReservationOccurrenceId.HasValue ||
+                          x.ReservationOccurrenceId != booking.ReservationOccurrenceId) &&
+                         request.ProposedStartUtc < x.ReservationEndUtc &&
+                         occupiedEnd > x.ReservationStartUtc,
+                    cancellationToken);
+
+                if (reservationConflict)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "The proposed slot is now reserved.");
+                }
+
+                var otherHoldConflict = await _db.HallSlotHolds.AnyAsync(
+                    x => x.SlotHoldId != hold.SlotHoldId &&
+                         x.ConferenceHallId == request.ProposedHallId &&
+                         x.HoldStatus == (byte)SlotHoldStatus.Active &&
+                         x.HoldExpiresAtUtc > now &&
+                         request.ProposedStartUtc < x.HoldEndUtc &&
+                         occupiedEnd > x.HoldStartUtc,
+                    cancellationToken);
+
+                if (otherHoldConflict)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Another active modification hold conflicts with this slot.");
+                }
+
+                // Apply the proposed booking details.
+                var oldValues = new
+                {
+                    booking.ConferenceHallId,
+                    booking.MeetingStartUtc,
+                    booking.MeetingEndUtc,
+                    booking.MeetingSubject,
+                    booking.ChairedBy,
+                    booking.ResponsiblePersonName,
+                    booking.ResponsiblePersonDesignation,
+                    booking.ResponsiblePersonMobile
+                };
+
+                booking.ConferenceHallId = request.ProposedHallId;
+                booking.MeetingStartUtc = request.ProposedStartUtc;
+                booking.MeetingEndUtc = request.ProposedEndUtc;
+
+                if (request.ProposedSubject != null)
+                    booking.MeetingSubject = request.ProposedSubject;
+
+                if (request.ProposedChairedBy != null)
+                    booking.ChairedBy = request.ProposedChairedBy;
+
+                if (request.ProposedContactName != null)
+                    booking.ResponsiblePersonName = request.ProposedContactName;
+
+                if (request.ProposedContactDesignation != null)
+                    booking.ResponsiblePersonDesignation =
+                        request.ProposedContactDesignation;
+
+                if (request.ProposedContactMobile != null)
+                    booking.ResponsiblePersonMobile = request.ProposedContactMobile;
+
+                booking.UpdatedAtUtc = now;
+                booking.UpdatedByUserId = actorId;
+
+                // null snapshot = retain existing participants.
+                // [] snapshot = remove all existing participants.
+                if (request.ProposedParticipantsJson != null)
+                {
+                    var participants =
+                        JsonSerializer.Deserialize<List<BookingParticipantDto>>(
+                            request.ProposedParticipantsJson,
+                            new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            }) ?? new List<BookingParticipantDto>();
+
+                    var existingParticipants = await _db.BookingParticipants
+                        .Where(x => x.BookingId == booking.BookingId)
+                        .ToListAsync(cancellationToken);
+
+                    _db.BookingParticipants.RemoveRange(existingParticipants);
+
+                    foreach (var p in participants)
+                    {
+                        _db.BookingParticipants.Add(new BookingParticipant
+                        {
+                            BookingId = booking.BookingId,
+                            ParticipantUserId = p.ParticipantUserId,
+                            ParticipantName = p.ParticipantName,
+                            ParticipantDesignation = p.ParticipantDesignation,
+                            ParticipantDepartmentId = p.ParticipantDepartmentId,
+                            ParticipantEmail = p.ParticipantEmail,
+                            ParticipantType = p.ParticipantType,
+                            IsRequired = p.IsRequired,
+                            AttendanceStatus = (byte)ParticipantAttendanceStatus.Unknown,
+                            AddedByUserId = actorId,
+                            AddedAtUtc = now,
+                            IsActive = true
+                        });
+                    }
+                }
+
+                // null snapshot = retain existing facilities.
+                // [] snapshot = remove all existing facilities.
+                if (request.ProposedFacilitiesJson != null)
+                {
+                    var facilities =
+                        JsonSerializer.Deserialize<List<BookingFacilityDto>>(
+                            request.ProposedFacilitiesJson,
+                            new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            }) ?? new List<BookingFacilityDto>();
+
+                    var facilityIds = facilities
+                        .Select(x => x.FacilityId)
+                        .Distinct()
+                        .ToList();
+
+                    var validFacilities = await _db.HallFacilityMaps
+                        .Where(x =>
+                            x.ConferenceHallId == request.ProposedHallId &&
+                            x.IsAvailable &&
+                            facilityIds.Contains(x.FacilityId))
+                        .Select(x => x.FacilityId)
+                        .ToListAsync(cancellationToken);
+
+                    if (validFacilities.Count != facilityIds.Count)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return Failure(400,
+                            "One or more proposed facilities are unavailable in the proposed hall.");
+                    }
+
+                    var existingFacilities = await _db.BookingFacilityMaps
+                        .Where(x => x.BookingId == booking.BookingId)
+                        .ToListAsync(cancellationToken);
+
+                    _db.BookingFacilityMaps.RemoveRange(existingFacilities);
+
+                    foreach (var f in facilities)
+                    {
+                        _db.BookingFacilityMaps.Add(new BookingFacilityMap
+                        {
+                            BookingId = booking.BookingId,
+                            FacilityId = f.FacilityId,
+                            IsRequested = f.IsRequested,
+                            Remarks = f.Remarks
+                        });
+                    }
+                }
+
+                // VC snapshot is UTF-8 JSON, not encrypted.
+                // Credentials are never returned, logged or audited.
+                if (request.ProposedVCDetailsEncrypted != null)
+                {
+                    using var vcDocument = JsonDocument.Parse(
+                        request.ProposedVCDetailsEncrypted);
+
+                    var vcRoot = vcDocument.RootElement;
+
+                    var vcPlatformId = vcRoot
+                        .GetProperty("VCPlatformId")
+                        .GetInt32();
+
+                    var platformAvailable = await _db.HallVCPlatformMaps
+                        .AnyAsync(
+                            x => x.ConferenceHallId == request.ProposedHallId &&
+                                 x.VCPlatformId == vcPlatformId &&
+                                 x.IsActive,
+                            cancellationToken);
+
+                    if (!platformAvailable)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return Failure(400,
+                            "The proposed VC platform is not available in the proposed hall.");
+                    }
+
+                    var credentials = vcRoot.GetProperty("Credentials");
+
+                    var vcDetails = await _db.BookingVCDetails
+                        .FirstOrDefaultAsync(
+                            x => x.BookingId == booking.BookingId,
+                            cancellationToken);
+
+                    if (vcDetails == null)
+                    {
+                        vcDetails = new BookingVCDetails
+                        {
+                            BookingId = booking.BookingId,
+                            CreatedAtUtc = now
+                        };
+                        _db.BookingVCDetails.Add(vcDetails);
+                    }
+
+                    vcDetails.VCPlatformId = vcPlatformId;
+
+                    if (credentials.ValueKind == JsonValueKind.Object)
+                    {
+                        var meetingId = credentials
+                            .GetProperty("VCMeetingId").GetString() ?? "";
+
+                        var password = credentials
+                            .GetProperty("VCPassword").GetString() ?? "";
+
+                        vcDetails.VCMeetingIdEncrypted =
+                            Encoding.UTF8.GetBytes(meetingId);
+
+                        vcDetails.VCPasswordEncrypted =
+                            Encoding.UTF8.GetBytes(password);
+
+                        vcDetails.EncryptionKeyVersion = "PLAIN";
+
+                        if (credentials.TryGetProperty(
+                            "VCInstructions", out var instructions))
+                        {
+                            vcDetails.VCInstructions =
+                                instructions.GetString();
+                        }
+                    }
+
+                    vcDetails.UpdatedAtUtc = now;
+                }
+
+                var departmentId =
+                    await _currentUser.GetDepartmentIdAsync(cancellationToken);
+
+                var oldModificationStatus = request.ModificationStatus;
+
+                request.ModificationStatus = (byte)ModificationStatus.Approved;
+                request.ReviewedByUserId = actorId;
+                request.ReviewedAtUtc = now;
+                request.ReviewRemarks = dto.ReviewRemarks;
+
+                hold.HoldStatus = (byte)SlotHoldStatus.Released;
+                hold.ReleasedAtUtc = now;
+
+                _db.BookingStatusHistory.Add(new BookingStatusHistory
+                {
+                    BookingId = booking.BookingId,
+                    OldApprovalStatus = booking.ApprovalStatus,
+                    NewApprovalStatus = booking.ApprovalStatus,
+                    OldMeetingStatus = booking.MeetingStatus,
+                    NewMeetingStatus = booking.MeetingStatus,
+                    ChangedByUserId = actorId,
+                    RepresentedDepartmentId = departmentId,
+                    Remarks = "Booking modified: " + request.ChangeReason,
+                    ChangedAtUtc = now
+                });
+
+                _db.BookingAuditLogs.Add(new BookingAuditLog
+                {
+                    EntityType = "BookingModification",
+                    EntityId = request.ModificationRequestId,
+                    ActionType = "ModificationApproved",
+                    PerformedByUserId = actorId,
+                    RepresentedDepartmentId = departmentId,
+                    OldValuesJson = JsonSerializer.Serialize(oldValues),
+                    NewValuesJson = JsonSerializer.Serialize(new
+                    {
+                        booking.ConferenceHallId,
+                        booking.MeetingStartUtc,
+                        booking.MeetingEndUtc,
+                        booking.MeetingSubject,
+                        booking.ChairedBy
+                    }),
+                    Remarks = dto.ReviewRemarks ?? request.ChangeReason,
+                    CreatedAtUtc = now
+                });
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+
+                return new ResponseDto
+                {
+                    IsSuccess = true,
+                    StatusCode = 200,
+                    Message = "Modification approved and the original booking updated successfully.",
+                    Result = new
+                    {
+                        request.ModificationRequestId,
+                        booking.BookingId,
+                        booking.ConferenceHallId,
+                        booking.MeetingStartUtc,
+                        booking.MeetingEndUtc,
+                        request.ModificationStatus,
+                        request.ReviewedAtUtc
+                    }
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Failure(500,
+                    "An unexpected error occurred while approving the modification.");
+            }
+        }
+
+        public async Task<ResponseDto> Reject(
+            long modificationRequestId,
+            ModificationReviewDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_currentUser.IsAuthenticated)
+                return Failure(401, "Authentication is required.");
+
+            var actorId = _currentUser.UserId;
+            var isAdmin = _currentUser.IsInRole("Admin");
+
+            await using var transaction =
+                await _db.Database.BeginTransactionAsync(
+                    IsolationLevel.ReadCommitted, cancellationToken);
+
+            try
+            {
+                var request = await _db.BookingModificationRequests
+                    .FirstOrDefaultAsync(
+                        x => x.ModificationRequestId == modificationRequestId,
+                        cancellationToken);
+
+                if (request == null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(404, "Modification request not found.");
+                }
+
+                var booking = await _db.Bookings
+                    .FirstOrDefaultAsync(
+                        x => x.BookingId == request.BookingId,
+                        cancellationToken);
+
+                if (booking == null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(404, "Associated booking not found.");
+                }
+
+                if (!isAdmin)
+                {
+                    var canManageOriginal = await IsAssignedSubAdmin(
+                        booking.ConferenceHallId, cancellationToken);
+
+                    var canManageProposed = await IsAssignedSubAdmin(
+                        request.ProposedHallId, cancellationToken);
+
+                    if (!canManageOriginal || !canManageProposed)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return Failure(403,
+                            "You must be assigned SubAdmin for both halls.");
+                    }
+                }
+
+                var hallIds = new[]
+                {
+            booking.ConferenceHallId,
+            request.ProposedHallId
+        }.Distinct().OrderBy(x => x).ToArray();
+
+                foreach (var hallId in hallIds)
+                {
+                    var lockResult = await AcquireHallLock(
+                        hallId, cancellationToken);
+
+                    if (lockResult < 0)
+                    {
+                        await transaction.RollbackAsync(cancellationToken);
+                        return Failure(409,
+                            "Unable to acquire hall booking lock. Please retry.");
+                    }
+                }
+
+                await _db.Entry(request).ReloadAsync(cancellationToken);
+
+                if (request.ModificationStatus !=
+                    (byte)ModificationStatus.Pending)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return Failure(409, "Only pending modification requests can be rejected.");
+                }
+
+                var now = DateTime.UtcNow;
+
+                request.ModificationStatus = (byte)ModificationStatus.Rejected;
+                request.ReviewedByUserId = actorId;
+                request.ReviewedAtUtc = now;
+                request.ReviewRemarks = dto.ReviewRemarks;
+
+                var hold = await _db.HallSlotHolds
+                    .FirstOrDefaultAsync(
+                        x => x.ModificationRequestId == modificationRequestId &&
+                             x.HoldStatus == (byte)SlotHoldStatus.Active,
+                        cancellationToken);
+
+                if (hold != null)
+                {
+                    hold.HoldStatus = (byte)SlotHoldStatus.Released;
+                    hold.ReleasedAtUtc = now;
+                }
+
+                var departmentId =
+                    await _currentUser.GetDepartmentIdAsync(cancellationToken);
+
+                _db.BookingAuditLogs.Add(new BookingAuditLog
+                {
+                    EntityType = "BookingModification",
+                    EntityId = request.ModificationRequestId,
+                    ActionType = "ModificationRejected",
+                    PerformedByUserId = actorId,
+                    RepresentedDepartmentId = departmentId,
+                    Remarks = dto.ReviewRemarks ?? request.ChangeReason,
+                    CreatedAtUtc = now
+                });
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+
+                return new ResponseDto
+                {
+                    IsSuccess = true,
+                    StatusCode = 200,
+                    Message = "Modification rejected. The original booking remains unchanged and the proposed slot has been released.",
+                    Result = new
+                    {
+                        request.ModificationRequestId,
+                        request.BookingId,
+                        request.ModificationStatus,
+                        request.ReviewedAtUtc
+                    }
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return Failure(500,
+                    "An unexpected error occurred while rejecting the modification.");
+            }
+        }
+
+
         private async Task<int> AcquireHallLock(
             int hallId,
             CancellationToken cancellationToken)
@@ -562,7 +1347,7 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
             var parameter = command.CreateParameter();
             parameter.ParameterName = "@resource";
-            parameter.Value = $"CONVENE_HALL_{hallId}";
+            parameter.Value = $"CONVENE_HALL_BOOKING_{hallId}";
             command.Parameters.Add(parameter);
 
             var result = await command.ExecuteScalarAsync(
