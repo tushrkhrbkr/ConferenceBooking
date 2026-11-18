@@ -1324,136 +1324,165 @@ namespace ConferenceBooking.Services.BookingAPI.Service
         }
 
 
+
         public async Task<int> ExpirePendingRequests(
             CancellationToken cancellationToken = default)
         {
-            var now = DateTime.UtcNow;
+            const int batchSize = 100;
 
-            var expiredRequestIds = await _db.BookingModificationRequests
-                .AsNoTracking()
-                .Where(x =>
-                    x.ModificationStatus == (byte)ModificationStatus.Pending &&
-                    x.HoldExpiresAtUtc <= now)
-                .OrderBy(x => x.HoldExpiresAtUtc)
-                .Select(x => x.ModificationRequestId)
-                .Take(100)
-                .ToListAsync(cancellationToken);
+            var totalExpiredCount = 0;
 
-            var expiredCount = 0;
-
-            foreach (var requestId in expiredRequestIds)
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                await using var transaction =
-                    await _db.Database.BeginTransactionAsync(
-                        IsolationLevel.ReadCommitted,
-                        cancellationToken);
+                var now = DateTime.UtcNow;
 
-                try
+                // Fetch the next batch of requests that are due for expiry.
+                var expiredRequestIds = await _db.BookingModificationRequests
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.ModificationStatus ==
+                            (byte)ModificationStatus.Pending &&
+                        x.HoldExpiresAtUtc <= now)
+                    .OrderBy(x => x.HoldExpiresAtUtc)
+                    .ThenBy(x => x.ModificationRequestId)
+                    .Select(x => x.ModificationRequestId)
+                    .Take(batchSize)
+                    .ToListAsync(cancellationToken);
+
+                if (expiredRequestIds.Count == 0)
+                    break;
+
+                var batchExpiredCount = 0;
+
+                foreach (var requestId in expiredRequestIds)
                 {
-                    var request = await _db.BookingModificationRequests
-                        .FirstOrDefaultAsync(
-                            x => x.ModificationRequestId == requestId,
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    await using var transaction =
+                        await _db.Database.BeginTransactionAsync(
+                            IsolationLevel.ReadCommitted,
                             cancellationToken);
 
-                    if (request == null ||
-                        request.ModificationStatus !=
-                            (byte)ModificationStatus.Pending ||
-                        request.HoldExpiresAtUtc > DateTime.UtcNow)
+                    try
+                    {
+                        var request = await _db.BookingModificationRequests
+                            .FirstOrDefaultAsync(
+                                x => x.ModificationRequestId == requestId,
+                                cancellationToken);
+
+                        if (request == null ||
+                            request.ModificationStatus !=
+                                (byte)ModificationStatus.Pending ||
+                            request.HoldExpiresAtUtc > DateTime.UtcNow)
+                        {
+                            await transaction.RollbackAsync(cancellationToken);
+                            continue;
+                        }
+
+                        // Use the same application lock as other booking operations.
+                        var lockResult = await AcquireHallLock(
+                            request.ProposedHallId,
+                            cancellationToken);
+
+                        if (lockResult < 0)
+                        {
+                            await transaction.RollbackAsync(cancellationToken);
+                            continue;
+                        }
+
+                        // Recheck after acquiring the lock.
+                        await _db.Entry(request).ReloadAsync(cancellationToken);
+
+                        if (request.ModificationStatus !=
+                                (byte)ModificationStatus.Pending ||
+                            request.HoldExpiresAtUtc > DateTime.UtcNow)
+                        {
+                            await transaction.RollbackAsync(cancellationToken);
+                            continue;
+                        }
+
+                        var currentTime = DateTime.UtcNow;
+
+                        request.ModificationStatus =
+                            (byte)ModificationStatus.Expired;
+
+                        request.ReviewedAtUtc = currentTime;
+
+                        request.ReviewRemarks =
+                            "Automatically expired because the modification hold period elapsed.";
+
+                        var activeHolds = await _db.HallSlotHolds
+                            .Where(x =>
+                                x.ModificationRequestId == requestId &&
+                                x.HoldStatus == (byte)SlotHoldStatus.Active)
+                            .ToListAsync(cancellationToken);
+
+                        foreach (var hold in activeHolds)
+                        {
+                            hold.HoldStatus = (byte)SlotHoldStatus.Expired;
+                            hold.ReleasedAtUtc = currentTime;
+                        }
+
+                        _db.BookingAuditLogs.Add(new BookingAuditLog
+                        {
+                            EntityType = "BookingModification",
+                            EntityId = request.ModificationRequestId,
+                            ActionType = "ModificationExpired",
+                            PerformedByUserId = "SYSTEM",
+                            RepresentedDepartmentId =
+                                request.RequestedByDepartmentId,
+
+                            OldValuesJson =
+                                System.Text.Json.JsonSerializer.Serialize(new
+                                {
+                                    ModificationStatus =
+                                        (byte)ModificationStatus.Pending
+                                }),
+
+                            NewValuesJson =
+                                System.Text.Json.JsonSerializer.Serialize(new
+                                {
+                                    ModificationStatus =
+                                        (byte)ModificationStatus.Expired,
+                                    ExpiredAtUtc = currentTime,
+                                    ReleasedHoldCount = activeHolds.Count
+                                }),
+
+                            Remarks =
+                                "Modification request expired automatically.",
+
+                            CreatedAtUtc = currentTime
+                        });
+
+                        await _db.SaveChangesAsync(cancellationToken);
+                        await transaction.CommitAsync(cancellationToken);
+
+                        batchExpiredCount++;
+                        totalExpiredCount++;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
                     {
                         await transaction.RollbackAsync(cancellationToken);
-                        continue;
+                        throw;
                     }
-
-                    // Use the same lock resource as booking submission,
-                    // approval, rejection and withdrawal.
-                    var lockResult = await AcquireHallLock(
-                        request.ProposedHallId,
-                        cancellationToken);
-
-                    if (lockResult < 0)
-                    {
-                        await transaction.RollbackAsync(cancellationToken);
-                        continue;
-                    }
-
-                    // Recheck after acquiring the lock.
-                    await _db.Entry(request).ReloadAsync(cancellationToken);
-
-                    if (request.ModificationStatus !=
-                            (byte)ModificationStatus.Pending ||
-                        request.HoldExpiresAtUtc > DateTime.UtcNow)
-                    {
-                        await transaction.RollbackAsync(cancellationToken);
-                        continue;
-                    }
-
-                    var currentTime = DateTime.UtcNow;
-
-                    request.ModificationStatus =
-                        (byte)ModificationStatus.Expired;
-
-                    request.ReviewedAtUtc = currentTime;
-                    request.ReviewRemarks =
-                        "Automatically expired because the modification hold period elapsed.";
-
-                    var activeHolds = await _db.HallSlotHolds
-                        .Where(x =>
-                            x.ModificationRequestId == requestId &&
-                            x.HoldStatus == (byte)SlotHoldStatus.Active)
-                        .ToListAsync(cancellationToken);
-
-                    foreach (var hold in activeHolds)
-                    {
-                        hold.HoldStatus = (byte)SlotHoldStatus.Expired;
-                        hold.ReleasedAtUtc = currentTime;
-                    }
-
-                    _db.BookingAuditLogs.Add(new BookingAuditLog
-                    {
-                        EntityType = "BookingModification",
-                        EntityId = request.ModificationRequestId,
-                        ActionType = "ModificationExpired",
-                        PerformedByUserId = "SYSTEM",
-                        RepresentedDepartmentId =
-                            request.RequestedByDepartmentId,
-                        OldValuesJson = System.Text.Json.JsonSerializer.Serialize(
-                            new
-                            {
-                                ModificationStatus =
-                                    (byte)ModificationStatus.Pending
-                            }),
-                        NewValuesJson = System.Text.Json.JsonSerializer.Serialize(
-                            new
-                            {
-                                ModificationStatus =
-                                    (byte)ModificationStatus.Expired,
-                                ExpiredAtUtc = currentTime,
-                                ReleasedHoldCount = activeHolds.Count
-                            }),
-                        Remarks = "Modification request expired automatically.",
-                        CreatedAtUtc = currentTime
-                    });
-
-                    await _db.SaveChangesAsync(cancellationToken);
-                    await transaction.CommitAsync(cancellationToken);
-
-                    expiredCount++;
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                    throw;
-                }
+
+                // If nothing was expired, the remaining records may be locked
+                // by another instance or may have changed status concurrently.
+                // Exit and retry them during the next worker cycle.
+                if (batchExpiredCount == 0)
+                    break;
             }
 
-            return expiredCount;
+            return totalExpiredCount;
         }
+
 
 
         private async Task<int> AcquireHallLock(
