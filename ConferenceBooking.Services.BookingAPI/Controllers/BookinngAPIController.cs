@@ -15,19 +15,22 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
         private readonly IVCPlatformService _vcPlatformService;
         private readonly IHallMappingService _hallMappingService;
         private readonly IBookingService _bookingService;
+        private readonly IBookingModificationService _bookingModificationService;
 
         public BookingAPIController(
             IConferenceHallService conferenceHallService,
             IFacilityService facilityService,
             IVCPlatformService vcPlatformService,
             IHallMappingService hallMappingService,
-            IBookingService bookingService)
+            IBookingService bookingService,
+            IBookingModificationService bookingModificationService)
         {
             _conferenceHallService = conferenceHallService;
             _facilityService = facilityService;
             _vcPlatformService = vcPlatformService;
             _hallMappingService = hallMappingService;
             _bookingService = bookingService;
+            _bookingModificationService = bookingModificationService;
         }
 
         // =========================================================
@@ -502,6 +505,48 @@ namespace ConferenceBooking.Services.BookingAPI.Controllers
             return StatusCode(response.StatusCode, response);
         }
 
+
+        // =========================================================
+        // BOOKING MODIFICATION APIs
+        // =========================================================
+
+        // POST: api/bookings/modifications
+        [HttpPost("~/api/bookings/modifications")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> SubmitBookingModification(
+            [FromBody] BookingModificationDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingModificationService.Submit(
+                dto, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // GET: api/bookings/modifications/my
+        [HttpGet("~/api/bookings/modifications/my")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> GetMyBookingModifications(
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingModificationService.GetMyRequests(
+                cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // PUT: api/bookings/modifications/15/withdraw
+        [HttpPut("~/api/bookings/modifications/{id:long}/withdraw")]
+        [Authorize(Policy = "AuthenticatedUser")]
+        public async Task<IActionResult> WithdrawBookingModification(
+            long id,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await _bookingModificationService.Withdraw(
+                id, cancellationToken);
+
+            return StatusCode(response.StatusCode, response);
+        }
 
     }
 }

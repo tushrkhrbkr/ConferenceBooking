@@ -172,7 +172,7 @@ namespace ConferenceBooking.Services.BookingAPI.Models.Dto
         [StringLength(500)] public string? Remarks { get; set; }
     }
 
-    // Credentials are accepted only over HTTPS and encrypted by the service before persistence.
+    // Credentials are accepted only over HTTPS and stored without encryption.
     // They must never be logged or returned in a normal booking response.
     public class BookingVCCredentialsDto
     {
