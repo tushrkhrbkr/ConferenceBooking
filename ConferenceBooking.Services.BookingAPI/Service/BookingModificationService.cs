@@ -1597,8 +1597,31 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                             CreatedAtUtc = currentTime
                         });
 
+
+                        // Resolve the original booking for the expiry notification.
+                        var booking = await _db.Bookings
+                            .FirstOrDefaultAsync(
+                                x => x.BookingId == request.BookingId,
+                                cancellationToken);
+
+                        // Notify the original requester.
+                        // A missing booking or requester email must not prevent expiry processing.
+                        if (booking != null)
+                        {
+                            await QueueModificationRequesterNotificationAsync(
+                                booking,
+                                request,
+                                "SYSTEM",
+                                "ModificationExpired",
+                                request.ReviewRemarks,
+                                cancellationToken);
+                        }
+
+                        // Persist expiry status, released holds, audit entry and notification
+                        // in the same transaction.
                         await _db.SaveChangesAsync(cancellationToken);
                         await transaction.CommitAsync(cancellationToken);
+
 
                         batchExpiredCount++;
                         totalExpiredCount++;

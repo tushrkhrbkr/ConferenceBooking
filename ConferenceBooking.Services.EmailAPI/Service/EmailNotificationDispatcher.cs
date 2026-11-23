@@ -119,6 +119,7 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                 "ModificationWithdrawn" => "MODIFICATION_WITHDRAWN",
                 "ModificationApproved" => "MODIFICATION_APPROVED",
                 "ModificationRejected" => "MODIFICATION_REJECTED",
+                "ModificationExpired" => "MODIFICATION_EXPIRED",
 
                 _ => throw new NotSupportedException(
                     $"Unsupported email event type: {eventType}")
@@ -170,12 +171,47 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                     }
 
                 case "BookingSubmitted":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
                 case "BookingApproved":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
                 case "BookingRejected":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
                 case "BookingCancelled":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
                 case "ModificationSubmitted":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
                 case "ModificationWithdrawn":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
                 case "ModificationApproved":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
                 case "ModificationRejected":
                     {
                         AddBookingLifecycleReplacements(notification, replacements);
@@ -183,6 +219,12 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                     }
 
                 case "VCMeetingCancelled":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
+                case "ModificationExpired":
                     {
                         AddBookingLifecycleReplacements(notification, replacements);
                         break;
