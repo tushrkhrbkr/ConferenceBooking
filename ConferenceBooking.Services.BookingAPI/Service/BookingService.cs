@@ -1015,6 +1015,8 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                 // Persist the rejection notification in the same transaction.
                 await _db.SaveChangesAsync(cancellationToken);
 
+                await transaction.CommitAsync(cancellationToken);
+
                 return new ResponseDto
                 {
                     IsSuccess = true,
@@ -1146,7 +1148,21 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     CreatedAtUtc = now
                 });
 
+                // Persist cancellation status and audit history.
                 await _db.SaveChangesAsync(cancellationToken);
+
+                // Queue cancellation notifications for all applicable recipients.
+                await QueueBookingCancelledNotificationsAsync(
+                    booking,
+                    actorId,
+                    oldStatus,
+                    booking.CancellationReason,
+                    transaction,
+                    cancellationToken);
+
+                // Persist all notification outbox entries atomically.
+                await _db.SaveChangesAsync(cancellationToken);
+
                 await transaction.CommitAsync(cancellationToken);
 
                 return new ResponseDto
@@ -1649,6 +1665,305 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     CreatedAtUtc = now,
                     UpdatedAtUtc = now
                 });
+        }
+
+        private async Task QueueBookingCancelledNotificationsAsync(
+    Booking booking,
+    string cancelledByUserId,
+    byte oldApprovalStatus,
+    string cancellationReason,
+    IDbContextTransaction transaction,
+    CancellationToken cancellationToken)
+        {
+            var now = DateTime.UtcNow;
+
+            var recipients = new List<(string Name, string Email)>();
+
+            void AddRecipient(string? name, string? username, string? email)
+            {
+                if (string.IsNullOrWhiteSpace(email))
+                    return;
+
+                var recipientName = !string.IsNullOrWhiteSpace(name)
+                    ? name.Trim()
+                    : !string.IsNullOrWhiteSpace(username)
+                        ? username.Trim()
+                        : "User";
+
+                recipients.Add((recipientName, email.Trim()));
+            }
+
+            // ---------------------------------------------------------
+            // 1. Original requester
+            // ---------------------------------------------------------
+
+            var requester = await _db.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.UserId == booking.RequestedByUserId && x.IsActive,
+                    cancellationToken);
+
+            if (requester != null)
+            {
+                AddRecipient(
+                    requester.DisplayName,
+                    requester.Username,
+                    requester.EmailAddress);
+            }
+
+            // ---------------------------------------------------------
+            // 2. All active Admin users
+            // ---------------------------------------------------------
+
+            var connection = _db.Database.GetDbConnection();
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction.GetDbTransaction();
+
+                command.CommandText = @"
+            SELECT DISTINCT
+                p.DisplayName,
+                p.Username,
+                p.EmailAddress
+            FROM dbo.AspNetUserRoles ur
+            INNER JOIN dbo.AspNetRoles r
+                ON r.Id = ur.RoleId
+            INNER JOIN dbo.Tbl_UserProfile p
+                ON p.UserId = ur.UserId
+            WHERE UPPER(r.Name) = N'ADMIN'
+              AND p.IsActive = 1
+              AND NULLIF(LTRIM(RTRIM(p.EmailAddress)), '') IS NOT NULL;";
+
+                await using var reader =
+                    await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var displayName = reader.IsDBNull(0)
+                        ? null
+                        : reader.GetString(0);
+
+                    var username = reader.IsDBNull(1)
+                        ? null
+                        : reader.GetString(1);
+
+                    var email = reader.IsDBNull(2)
+                        ? null
+                        : reader.GetString(2);
+
+                    AddRecipient(displayName, username, email);
+                }
+            }
+
+            // ---------------------------------------------------------
+            // 3. Active SubAdmins assigned to this hall
+            // ---------------------------------------------------------
+
+            var subAdmins = await (
+                from map in _db.HallSubAdminMaps.AsNoTracking()
+                join profile in _db.UserProfiles.AsNoTracking()
+                    on map.UserId equals profile.UserId
+                where map.ConferenceHallId == booking.ConferenceHallId
+                      && map.IsActive
+                      && map.EffectiveFromUtc <= now
+                      && (!map.EffectiveToUtc.HasValue ||
+                          map.EffectiveToUtc.Value > now)
+                      && profile.IsActive
+                select new
+                {
+                    profile.DisplayName,
+                    profile.Username,
+                    profile.EmailAddress
+                }
+            ).ToListAsync(cancellationToken);
+
+            foreach (var user in subAdmins)
+            {
+                AddRecipient(
+                    user.DisplayName,
+                    user.Username,
+                    user.EmailAddress);
+            }
+
+            // ---------------------------------------------------------
+            // 4. Active Hall Managers assigned to this hall
+            // ---------------------------------------------------------
+
+            var hallManagers = await (
+                from map in _db.HallManagerMaps.AsNoTracking()
+                join profile in _db.UserProfiles.AsNoTracking()
+                    on map.UserId equals profile.UserId
+                where map.ConferenceHallId == booking.ConferenceHallId
+                      && map.IsActive
+                      && map.EffectiveFromUtc <= now
+                      && (!map.EffectiveToUtc.HasValue ||
+                          map.EffectiveToUtc.Value > now)
+                      && profile.IsActive
+                select new
+                {
+                    profile.DisplayName,
+                    profile.Username,
+                    profile.EmailAddress
+                }
+            ).ToListAsync(cancellationToken);
+
+            foreach (var user in hallManagers)
+            {
+                AddRecipient(
+                    user.DisplayName,
+                    user.Username,
+                    user.EmailAddress);
+            }
+
+            // ---------------------------------------------------------
+            // 5. Selected participants for approved VC meetings only
+            // ---------------------------------------------------------
+
+            var wasApproved =
+                oldApprovalStatus == (byte)BookingApprovalStatus.Approved;
+
+            if (wasApproved)
+            {
+                var hasVCDetails = await _db.BookingVCDetails
+                    .AnyAsync(
+                        x => x.BookingId == booking.BookingId,
+                        cancellationToken);
+
+                if (hasVCDetails)
+                {
+                    var participants = await _db.BookingParticipants
+                        .AsNoTracking()
+                        .Where(x =>
+                            x.BookingId == booking.BookingId &&
+                            x.IsActive &&
+                            x.ParticipantEmail != null &&
+                            x.ParticipantEmail != "")
+                        .Select(x => new
+                        {
+                            x.ParticipantName,
+                            x.ParticipantEmail
+                        })
+                        .ToListAsync(cancellationToken);
+
+                    foreach (var participant in participants)
+                    {
+                        AddRecipient(
+                            participant.ParticipantName,
+                            null,
+                            participant.ParticipantEmail);
+                    }
+                }
+            }
+
+            // ---------------------------------------------------------
+            // 6. Deduplicate all recipients by email address
+            // ---------------------------------------------------------
+
+            var uniqueRecipients = recipients
+                .Where(x => !string.IsNullOrWhiteSpace(x.Email))
+                .GroupBy(
+                    x => x.Email,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.First())
+                .ToList();
+
+            // ---------------------------------------------------------
+            // 7. Resolve cancelling officer
+            // ---------------------------------------------------------
+
+            var cancellingOfficer = await _db.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.UserId == cancelledByUserId,
+                    cancellationToken);
+
+            var actionBy = cancellingOfficer == null
+                ? "Conference Administration"
+                : !string.IsNullOrWhiteSpace(cancellingOfficer.DisplayName)
+                    ? cancellingOfficer.DisplayName
+                    : cancellingOfficer.Username;
+
+            var requesterName = requester == null
+                ? "Booking requester"
+                : !string.IsNullOrWhiteSpace(requester.DisplayName)
+                    ? requester.DisplayName
+                    : requester.Username;
+
+            // ---------------------------------------------------------
+            // 8. Resolve hall and meeting timings
+            // ---------------------------------------------------------
+
+            var hallName = await _db.ConferenceHalls
+                .AsNoTracking()
+                .Where(x => x.ConferenceHallId == booking.ConferenceHallId)
+                .Select(x => x.HallName)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? "Conference Hall";
+
+            var indiaTimeZone =
+                TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+
+            var meetingStart = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingStartUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var meetingEnd = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingEndUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var startText = meetingStart.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                CultureInfo.InvariantCulture) + " IST";
+
+            var endText = meetingEnd.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                CultureInfo.InvariantCulture) + " IST";
+
+            // ---------------------------------------------------------
+            // 9. Queue cancellation email for each unique recipient
+            // ---------------------------------------------------------
+
+            foreach (var recipient in uniqueRecipients)
+            {
+                var payload = new
+                {
+                    RecipientName = recipient.Name,
+                    RequesterName = requesterName,
+                    BookingReference = booking.BookingReferenceNo,
+                    MeetingSubject = booking.MeetingSubject,
+                    HallName = hallName,
+                    MeetingStart = startText,
+                    MeetingEnd = endText,
+                    ActionBy = actionBy,
+                    Remarks = cancellationReason
+                };
+
+                _db.EmailNotificationOutbox.Add(
+                    new EmailNotificationOutbox
+                    {
+                        EventType = "BookingCancelled",
+                        ToEmail = recipient.Email,
+                        CcEmail = null,
+                        BccEmail = null,
+                        Subject = null,
+
+                        // No VC credentials are included.
+                        PayloadJson = JsonSerializer.Serialize(payload),
+
+                        Status = EmailNotificationStatus.Pending,
+                        AttemptCount = 0,
+                        MaxAttempts = 5,
+                        NextAttemptAtUtc = now,
+
+                        CreatedAtUtc = now,
+                        UpdatedAtUtc = now
+                    });
+            }
         }
 
         private async Task<bool> IsAssignedSubAdmin(
