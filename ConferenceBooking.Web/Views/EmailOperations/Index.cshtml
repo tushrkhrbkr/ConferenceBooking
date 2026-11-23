@@ -1,0 +1,624 @@
+﻿@model ConferenceBooking.Web.Models.EmailOperations.EmailOperationsDashboardDto
+@using System.Text.Json
+
+@{
+    ViewData["Title"] = "Email Operations";
+
+    var dailyJson = JsonSerializer.Serialize(Model.Metrics.DailyMetrics);
+    var eventJson = JsonSerializer.Serialize(Model.Metrics.EventMetrics);
+
+    var fromDate = Model.FromUtc.ToString("yyyy-MM-dd");
+    var toDate = Model.ToUtc.AddDays(-1).ToString("yyyy-MM-dd");
+}
+
+<div class="page-container">
+
+    <div class="page-title-head d-flex align-items-center justify-content-between">
+        <div>
+            <h4 class="fw-bold mb-1">Email Operations</h4>
+            <p class="text-muted mb-0">
+                Monitor email delivery, outbox health and failed notifications
+            </p>
+        </div>
+
+        <div class="d-flex gap-2">
+            <span class="badge bg-success-subtle text-success fs-12">
+                <i class="ti ti-activity me-1"></i>
+                EmailAPI Monitoring
+            </span>
+
+            <a asp-action="Index" class="btn btn-light">
+                <i class="ti ti-refresh me-1"></i> Refresh
+            </a>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-warning alert-dismissible fade show mt-3">
+            <i class="ti ti-alert-triangle me-2"></i>
+            @Model.ErrorMessage
+            <button type="button" class="btn-close"
+                    data-bs-dismiss="alert"></button>
+        </div>
+    }
+
+    <div class="row mt-3">
+
+        <div class="col-xl-12">
+            <div class="card">
+                <div class="card-body">
+                    <form method="get" asp-action="Index"
+                          class="row align-items-end g-3">
+
+                        <div class="col-md-4">
+                            <label class="form-label">From date (UTC)</label>
+                            <input type="date" name="fromUtc"
+                                   class="form-control"
+                                   value="@fromDate" required />
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">To date (UTC)</label>
+                            <input type="date" name="toUtc"
+                                   class="form-control"
+                                   value="@toDate" required />
+                        </div>
+
+                        <div class="col-md-4">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="ti ti-filter me-1"></i>
+                                Apply Filter
+                            </button>
+
+                            <a asp-action="Index"
+                               class="btn btn-light ms-1">
+                                Last 30 Days
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Outbox health -->
+    <div class="row">
+
+        <div class="col-xl col-md-4 col-6">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <p class="text-muted mb-1">Pending</p>
+                            <h3 class="mb-0">
+                                @Model.Health.PendingCount
+                            </h3>
+                        </div>
+                        <div class="avatar-md rounded bg-warning-subtle
+                                    d-flex align-items-center justify-content-center">
+                            <i class="ti ti-clock fs-24 text-warning"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl col-md-4 col-6">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <p class="text-muted mb-1">Processing</p>
+                            <h3 class="mb-0">
+                                @Model.Health.ProcessingCount
+                            </h3>
+                        </div>
+                        <div class="avatar-md rounded bg-info-subtle
+                                    d-flex align-items-center justify-content-center">
+                            <i class="ti ti-loader fs-24 text-info"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl col-md-4 col-6">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <p class="text-muted mb-1">Sent</p>
+                            <h3 class="mb-0">
+                                @Model.Health.SentCount
+                            </h3>
+                        </div>
+                        <div class="avatar-md rounded bg-success-subtle
+                                    d-flex align-items-center justify-content-center">
+                            <i class="ti ti-mail-check fs-24 text-success"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl col-md-4 col-6">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <p class="text-muted mb-1">Failed</p>
+                            <h3 class="mb-0">
+                                @Model.Health.FailedCount
+                            </h3>
+                        </div>
+                        <div class="avatar-md rounded bg-danger-subtle
+                                    d-flex align-items-center justify-content-center">
+                            <i class="ti ti-mail-exclamation fs-24 text-danger"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl col-md-4 col-6">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <p class="text-muted mb-1">Dead Letter</p>
+                            <h3 class="mb-0 text-danger">
+                                @Model.Health.DeadLetterCount
+                            </h3>
+                        </div>
+                        <div class="avatar-md rounded bg-danger-subtle
+                                    d-flex align-items-center justify-content-center">
+                            <i class="ti ti-alert-octagon fs-24 text-danger"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Reporting summary -->
+    <div class="row">
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <p class="text-muted mb-1">Total Notifications</p>
+                    <h3 class="mb-0">@Model.Metrics.TotalCount</h3>
+                    <small class="text-muted">Selected reporting period</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <p class="text-muted mb-1">Sent</p>
+                    <h3 class="mb-0 text-success">
+                        @Model.Metrics.SentCount
+                    </h3>
+                    <small class="text-muted">Sent status in selected cohort</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <p class="text-muted mb-1">Failed</p>
+                    <h3 class="mb-0 text-danger">
+                        @Model.Metrics.FailedCount
+                    </h3>
+                    <small class="text-muted">Failed status in selected cohort</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <p class="text-muted mb-1">Dead Letter</p>
+                    <h3 class="mb-0 text-danger">
+                        @Model.Metrics.DeadLetterCount
+                    </h3>
+                    <small class="text-muted">Dead-letter status in selected cohort</small>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Charts -->
+    <div class="row">
+
+        <div class="col-xl-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        Daily Notification Status
+                    </h5>
+                    <p class="text-muted mb-0 fs-12">
+                        Grouped by notification creation date (UTC)
+                    </p>
+                </div>
+                <div class="card-body">
+                    <div id="emailDailyChart" style="min-height:320px;"></div>
+                    <div id="emailDailyEmpty"
+                         class="text-muted text-center py-5 d-none">
+                        No delivery records available for this period.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        Event-wise Notifications
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="emailEventChart" style="min-height:320px;"></div>
+                    <div id="emailEventEmpty"
+                         class="text-muted text-center py-5 d-none">
+                        No event records available.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Queue age -->
+    <div class="row">
+        <div class="col-xl-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Queue Health Details</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+
+                        <div class="col-md-6">
+                            <p class="text-muted mb-1">
+                                Oldest pending notification
+                            </p>
+                            <h6>
+                                @(Model.Health.OldestPendingCreatedAtUtc?.ToString("dd MMM yyyy HH:mm:ss 'UTC'") ?? "No pending notification")
+                            </h6>
+                        </div>
+
+                        <div class="col-md-6">
+                            <p class="text-muted mb-1">
+                                Oldest processing lock
+                            </p>
+                            <h6>
+                                @(Model.Health.OldestProcessingLockedAtUtc?.ToString("dd MMM yyyy HH:mm:ss 'UTC'") ?? "No processing notification")
+                            </h6>
+                        </div>
+
+                        <div class="col-12">
+                            <small class="text-muted">
+                                Health snapshot:
+                                @Model.Health.GeneratedAtUtc.ToString("dd MMM yyyy HH:mm:ss 'UTC'")
+                            </small>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dead-letter queue -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+
+                <div class="card-header d-flex justify-content-between
+                            align-items-center">
+                    <div>
+                        <h5 class="card-title mb-0">
+                            Dead-Letter Notifications
+                        </h5>
+                        <p class="text-muted mb-0 fs-12">
+                            Notifications requiring administrator attention
+                        </p>
+                    </div>
+
+                    <span class="badge bg-danger-subtle text-danger">
+                        @Model.DeadLetters.Count records
+                    </span>
+                </div>
+
+                <div class="card-body">
+
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Outbox ID</th>
+                                    <th>Event</th>
+                                    <th>Created (UTC)</th>
+                                    <th>Attempts</th>
+                                    <th>Last Attempt (UTC)</th>
+                                    <th>Last Error</th>
+                                    <th class="text-end">Action</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                @if (Model.DeadLetters.Any())
+                                {
+                                    foreach (var item in Model.DeadLetters)
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">
+                                                @item.EmailNotificationOutboxId
+                                            </td>
+
+                                            <td>
+                                                <span class="badge bg-light text-dark">
+                                                    @item.EventType
+                                                </span>
+                                            </td>
+
+                                            <td>
+                                                @item.CreatedAtUtc.ToString("dd MMM yyyy HH:mm")
+                                            </td>
+
+                                            <td>
+                                                <span class="text-danger fw-semibold">
+                                                    @item.AttemptCount / @item.MaxAttempts
+                                                </span>
+                                            </td>
+
+                                            <td>
+                                                @(item.LastAttemptAtUtc?.ToString("dd MMM yyyy HH:mm") ?? "-")
+                                            </td>
+
+                                            <td style="min-width:220px;max-width:350px;">
+                                                <span class="text-danger"
+                                                      title="@item.LastError">
+                                                    @(string.IsNullOrWhiteSpace(item.LastError)
+                                                                                                ? "No error recorded"
+                                                                                                : item.LastError)
+                                        </span>
+                                    </td>
+
+                                            <td class="text-end">
+                                                <button type="button"
+                                                        class="btn btn-sm btn-soft-primary retry-email-btn"
+                                                        data-id="@item.EmailNotificationOutboxId"
+                                                        data-event="@item.EventType">
+                                                    <i class="ti ti-refresh me-1"></i>
+                                                    Retry
+                                                </button>
+                                            </td>
+                                        </tr>
+                                                                }
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td colspan="7"
+                                            class="text-center text-muted py-4">
+                                            <i class="ti ti-circle-check fs-24 text-success"></i>
+                                            <div>No dead-letter notifications found.</div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Retry confirmation modal -->
+<div class="modal fade" id="retryEmailModal" tabindex="-1"
+     aria-labelledby="retryEmailModalLabel" aria-hidden="true">
+
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+
+            <form asp-controller="EmailOperations"
+                  asp-action="Retry"
+                  method="post">
+
+                @Html.AntiForgeryToken()
+
+                <div class="modal-header">
+                    <h5 class="modal-title" id="retryEmailModalLabel">
+                        Retry Dead-Letter Notification
+                    </h5>
+                    <button type="button" class="btn-close"
+                            data-bs-dismiss="modal"></button>
+                </div>
+
+                <div class="modal-body">
+
+                    <input type="hidden" name="notificationId"
+                           id="retryNotificationId" />
+
+                    <div class="alert alert-warning">
+                        This action will requeue the notification.
+                        The EmailAPI worker will attempt delivery again.
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Notification</label>
+                        <input type="text" id="retryEventType"
+                               class="form-control" readonly />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">
+                            Reason for retry
+                        </label>
+
+                        <textarea name="reason" id="retryReason"
+                                  class="form-control"
+                                  rows="3"
+                                  minlength="10"
+                                  maxlength="500"
+                                  required
+                                  placeholder="Explain why this notification is being retried..."></textarea>
+
+                        <small class="text-muted">
+                            Minimum 10 and maximum 500 characters.
+                        </small>
+                    </div>
+
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light"
+                            data-bs-dismiss="modal">
+                        Cancel
+                    </button>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="ti ti-refresh me-1"></i>
+                        Confirm Retry
+                    </button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+
+            const dailyData = @Html.Raw(dailyJson);
+            const eventData = @Html.Raw(eventJson);
+
+            // Daily delivery chart
+            if (dailyData && dailyData.length > 0) {
+
+                const dailyOptions = {
+                    chart: {
+                        type: "area",
+                        height: 320,
+                        toolbar: { show: true },
+                        zoom: { enabled: false }
+                    },
+                    series: [
+                        {
+                            name: "Sent",
+                            data: dailyData.map(x => x.SentCount)
+                        },
+                        {
+                            name: "Failed",
+                            data: dailyData.map(x => x.FailedCount)
+                        },
+                        {
+                            name: "Dead Letter",
+                            data: dailyData.map(x => x.DeadLetterCount)
+                        }
+                    ],
+                    xaxis: {
+                        categories: dailyData.map(x =>
+                            new Date(x.DateUtc).toLocaleDateString()),
+                        labels: { rotate: -35 }
+                    },
+                    yaxis: {
+                        min: 0,
+                        forceNiceScale: true,
+                        title: { text: "Notifications" }
+                    },
+                    dataLabels: { enabled: false },
+                    stroke: { curve: "smooth", width: 2 },
+                    legend: { position: "top" },
+                    noData: { text: "No data available" }
+                };
+
+                new ApexCharts(
+                    document.querySelector("#emailDailyChart"),
+                    dailyOptions
+                ).render();
+
+            } else {
+                document.getElementById("emailDailyChart").classList.add("d-none");
+                document.getElementById("emailDailyEmpty").classList.remove("d-none");
+            }
+
+            // Event-wise chart
+            if (eventData && eventData.length > 0) {
+
+                const eventOptions = {
+                    chart: {
+                        type: "bar",
+                        height: 320,
+                        toolbar: { show: false }
+                    },
+                    series: [
+                        {
+                            name: "Total",
+                            data: eventData.map(x => x.TotalCount)
+                        }
+                    ],
+                    plotOptions: {
+                        bar: {
+                            horizontal: true,
+                            borderRadius: 4
+                        }
+                    },
+                    xaxis: {
+                        categories: eventData.map(x => x.EventType)
+                    },
+                    dataLabels: { enabled: true },
+                    legend: { show: false }
+                };
+
+                new ApexCharts(
+                    document.querySelector("#emailEventChart"),
+                    eventOptions
+                ).render();
+
+            } else {
+                document.getElementById("emailEventChart").classList.add("d-none");
+                document.getElementById("emailEventEmpty").classList.remove("d-none");
+            }
+
+            // Retry modal
+            document.querySelectorAll(".retry-email-btn").forEach(button => {
+
+                button.addEventListener("click", function () {
+
+                    document.getElementById("retryNotificationId").value =
+                        this.dataset.id;
+
+                    document.getElementById("retryEventType").value =
+                        this.dataset.event;
+
+                    document.getElementById("retryReason").value = "";
+
+                    const modalElement =
+                        document.getElementById("retryEmailModal");
+
+                    const modal =
+                        bootstrap.Modal.getOrCreateInstance(modalElement);
+
+                    modal.show();
+                });
+            });
+
+        });
+    </script>
+}

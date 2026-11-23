@@ -8,7 +8,7 @@ using Newtonsoft.Json;
 
 namespace ConferenceBooking.Web.Controllers
 {
-    [Authorize(Roles = "ADMIN")]
+    [Authorize(Roles = "Admin,ADMIN")]
     public class EmailOperationsController : Controller
     {
         private readonly IEmailOperationsService _emailService;
