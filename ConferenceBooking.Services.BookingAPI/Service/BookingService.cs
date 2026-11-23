@@ -858,7 +858,24 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     CreatedAtUtc = now
                 });
 
+                // Persist the approval and status history first.
                 await _db.SaveChangesAsync(cancellationToken);
+
+                // Queue approval notification to the original requester.
+                await QueueBookingApprovedNotificationAsync(
+                    booking,
+                    actorId,
+                    dto.Remarks,
+                    cancellationToken);
+
+                // Send separate VC invitations to selected participants.
+                await QueueVCMeetingInvitationsAsync(
+                    booking,
+                    cancellationToken);
+
+                // Persist outbox notification in the same transaction.
+                await _db.SaveChangesAsync(cancellationToken);
+
                 await transaction.CommitAsync(cancellationToken);
 
                 return new ResponseDto
@@ -984,25 +1001,19 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     CreatedAtUtc = now
                 });
 
-                // Persist the approval and status history first.
+                // Persist rejection and status history first.
                 await _db.SaveChangesAsync(cancellationToken);
 
-                // Queue approval notification to the original requester.
-                await QueueBookingApprovedNotificationAsync(
+                // Notify only the original requester about the rejection.
+                // No VC invitation or participant notification is sent.
+                await QueueBookingRejectedNotificationAsync(
                     booking,
                     actorId,
-                    dto.Remarks,
+                    booking.RejectionReason,
                     cancellationToken);
 
-                // Send separate VC invitations to selected participants.
-                await QueueVCMeetingInvitationsAsync(
-                    booking,
-                    cancellationToken);
-
-                // Persist outbox notification in the same transaction.
+                // Persist the rejection notification in the same transaction.
                 await _db.SaveChangesAsync(cancellationToken);
-
-                await transaction.CommitAsync(cancellationToken);
 
                 return new ResponseDto
                 {
@@ -1533,6 +1544,112 @@ namespace ConferenceBooking.Services.BookingAPI.Service
             }
         }
 
+        private async Task QueueBookingRejectedNotificationAsync(
+            Booking booking,
+            string rejectedByUserId,
+            string rejectionReason,
+            CancellationToken cancellationToken)
+        {
+            var now = DateTime.UtcNow;
+
+            // Resolve the original requester.
+            var requester = await _db.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.UserId == booking.RequestedByUserId && x.IsActive,
+                    cancellationToken);
+
+            // Rejection must not fail merely because the requester has no email.
+            if (requester == null ||
+                string.IsNullOrWhiteSpace(requester.EmailAddress))
+            {
+                return;
+            }
+
+            // Resolve the rejecting officer's display name.
+            var rejectingOfficer = await _db.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.UserId == rejectedByUserId && x.IsActive,
+                    cancellationToken);
+
+            var rejectingOfficerName = rejectingOfficer == null
+                ? "Conference Administration"
+                : !string.IsNullOrWhiteSpace(rejectingOfficer.DisplayName)
+                    ? rejectingOfficer.DisplayName
+                    : rejectingOfficer.Username;
+
+            var requesterName = !string.IsNullOrWhiteSpace(requester.DisplayName)
+                ? requester.DisplayName
+                : requester.Username;
+
+            // Resolve conference hall.
+            var hallName = await _db.ConferenceHalls
+                .AsNoTracking()
+                .Where(x => x.ConferenceHallId == booking.ConferenceHallId)
+                .Select(x => x.HallName)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? "Conference Hall";
+
+            // Format meeting timings in Indian Standard Time.
+            var indiaTimeZone =
+                TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+
+            var meetingStart = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingStartUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var meetingEnd = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingEndUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var startText = meetingStart.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                CultureInfo.InvariantCulture) + " IST";
+
+            var endText = meetingEnd.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                CultureInfo.InvariantCulture) + " IST";
+
+            var payload = new
+            {
+                RecipientName = requesterName,
+                RequesterName = requesterName,
+                BookingReference = booking.BookingReferenceNo,
+                MeetingSubject = booking.MeetingSubject,
+                HallName = hallName,
+                MeetingStart = startText,
+                MeetingEnd = endText,
+                ActionBy = rejectingOfficerName,
+                Remarks = string.IsNullOrWhiteSpace(rejectionReason)
+                    ? "Your booking request has been rejected."
+                    : rejectionReason.Trim()
+            };
+
+            _db.EmailNotificationOutbox.Add(
+                new EmailNotificationOutbox
+                {
+                    EventType = "BookingRejected",
+                    ToEmail = requester.EmailAddress.Trim(),
+                    CcEmail = null,
+                    BccEmail = null,
+                    Subject = null,
+
+                    PayloadJson = JsonSerializer.Serialize(payload),
+
+                    Status = EmailNotificationStatus.Pending,
+                    AttemptCount = 0,
+                    MaxAttempts = 5,
+                    NextAttemptAtUtc = now,
+
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now
+                });
+        }
 
         private async Task<bool> IsAssignedSubAdmin(
             int hallId,
