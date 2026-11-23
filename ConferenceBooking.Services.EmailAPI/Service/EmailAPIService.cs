@@ -1,9 +1,13 @@
 ﻿using ConferenceBooking.Services.EmailAPI.Models;
 using ConferenceBooking.Services.EmailAPI.Models.Dto;
 using ConferenceBooking.Services.EmailAPI.Service.IService;
+using ConferenceBooking.Services.EmailAPI.Data;
+using ConferenceBooking.Services.EmailAPI.Enums;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Net;
 using System.Net.Mail;
+using System.Data;
 
 namespace ConferenceBooking.Services.EmailAPI.Service
 {
@@ -11,13 +15,16 @@ namespace ConferenceBooking.Services.EmailAPI.Service
     {
         private readonly EmailSettings _emailSettings;
         private readonly ILogger<EmailAPIService> _logger;
+        private readonly ApplicationDbContext _db;
 
         public EmailAPIService(
             IOptions<EmailSettings> emailSettings,
-            ILogger<EmailAPIService> logger)
+            ILogger<EmailAPIService> logger,
+            ApplicationDbContext db)
         {
             _emailSettings = emailSettings.Value;
             _logger = logger;
+            _db = db;
         }
 
         public async Task SendPasswordResetOtpAsync(
@@ -121,6 +128,248 @@ namespace ConferenceBooking.Services.EmailAPI.Service
 
                 throw;
             }
+        }
+
+
+        public async Task<EmailOutboxHealthDto> GetOutboxHealthAsync(
+            CancellationToken cancellationToken = default)
+        {
+            var outbox = _db.EmailNotificationOutbox.AsNoTracking();
+
+            var result = new EmailOutboxHealthDto
+            {
+                GeneratedAtUtc = DateTime.UtcNow,
+
+                PendingCount = await outbox.CountAsync(
+                    x => x.Status == EmailNotificationStatus.Pending,
+                    cancellationToken),
+
+                ProcessingCount = await outbox.CountAsync(
+                    x => x.Status == EmailNotificationStatus.Processing,
+                    cancellationToken),
+
+                SentCount = await outbox.CountAsync(
+                    x => x.Status == EmailNotificationStatus.Sent,
+                    cancellationToken),
+
+                FailedCount = await outbox.CountAsync(
+                    x => x.Status == EmailNotificationStatus.Failed,
+                    cancellationToken),
+
+                DeadLetterCount = await outbox.CountAsync(
+                    x => x.Status == EmailNotificationStatus.DeadLetter,
+                    cancellationToken),
+
+                OldestPendingCreatedAtUtc = await outbox
+                    .Where(x => x.Status == EmailNotificationStatus.Pending)
+                    .Select(x => (DateTime?)x.CreatedAtUtc)
+                    .MinAsync(cancellationToken),
+
+                OldestProcessingLockedAtUtc = await outbox
+                    .Where(x => x.Status == EmailNotificationStatus.Processing &&
+                                x.LockedAtUtc != null)
+                    .Select(x => x.LockedAtUtc)
+                    .MinAsync(cancellationToken)
+            };
+
+            return result;
+        }
+
+
+        public async Task<List<DeadLetterNotificationDto>>
+            GetDeadLetterNotificationsAsync(
+                CancellationToken cancellationToken = default)
+        {
+            return await _db.EmailNotificationOutbox
+                .AsNoTracking()
+                .Where(x => x.Status == EmailNotificationStatus.DeadLetter)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(100)
+                .Select(x => new DeadLetterNotificationDto
+                {
+                    EmailNotificationOutboxId =
+                        x.EmailNotificationOutboxId,
+
+                    EventType = x.EventType,
+                    CreatedAtUtc = x.CreatedAtUtc,
+                    AttemptCount = x.AttemptCount,
+                    MaxAttempts = x.MaxAttempts,
+                    LastAttemptAtUtc = x.LastAttemptAtUtc,
+                    LastError = x.LastError
+                })
+                .ToListAsync(cancellationToken);
+        }
+
+        public async Task<bool> RetryDeadLetterNotificationAsync(
+            long notificationId,
+            RetryDeadLetterNotificationDto request,
+            CancellationToken cancellationToken = default)
+        {
+            if (notificationId <= 0 ||
+                request == null ||
+                !request.ConfirmRetry ||
+                string.IsNullOrWhiteSpace(request.Reason))
+            {
+                return false;
+            }
+
+            var allowedEventTypes = new[]
+            {
+        "BookingSubmitted",
+        "BookingApproved",
+        "BookingRejected",
+        "BookingCancelled",
+        "VCMeetingCancelled",
+        "ModificationSubmitted",
+        "ModificationWithdrawn",
+        "ModificationApproved",
+        "ModificationRejected",
+        "ModificationExpired"
+    };
+
+            await using var transaction =
+                await _db.Database.BeginTransactionAsync(
+                    IsolationLevel.ReadCommitted,
+                    cancellationToken);
+
+            var notification = await _db.EmailNotificationOutbox
+                .FromSqlInterpolated($@"
+            SELECT *
+            FROM dbo.Tbl_EmailNotificationOutbox
+                WITH (UPDLOCK, ROWLOCK)
+            WHERE EmailNotificationOutboxId = {notificationId}")
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (notification == null ||
+                notification.Status != EmailNotificationStatus.DeadLetter ||
+                !allowedEventTypes.Contains(
+                    notification.EventType,
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var now = DateTime.UtcNow;
+
+            notification.Status = EmailNotificationStatus.Pending;
+
+            // Reset attempts so the normal worker can process the record.
+            notification.AttemptCount = 0;
+
+            notification.NextAttemptAtUtc = now;
+
+            notification.LockedBy = null;
+            notification.LockedAtUtc = null;
+            notification.LastAttemptAtUtc = null;
+            notification.SentAtUtc = null;
+
+            notification.LastError =
+                "Manually requeued. Reason: " + request.Reason.Trim();
+
+            notification.UpdatedAtUtc = now;
+
+            await _db.SaveChangesAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+
+            _logger.LogWarning(
+                "Dead-letter notification manually requeued. " +
+                "OutboxId={OutboxId}, EventType={EventType}",
+                notification.EmailNotificationOutboxId,
+                notification.EventType);
+
+            return true;
+        }
+
+
+        public async Task<EmailDeliveryMetricsDto> GetDeliveryMetricsAsync(
+            DateTime fromUtc,
+            DateTime toUtc,
+            CancellationToken cancellationToken = default)
+        {
+            fromUtc = DateTime.SpecifyKind(fromUtc, DateTimeKind.Utc);
+            toUtc = DateTime.SpecifyKind(toUtc, DateTimeKind.Utc);
+
+            if (toUtc <= fromUtc)
+                throw new ArgumentException("Invalid reporting date range.");
+
+            var query = _db.EmailNotificationOutbox
+                .AsNoTracking()
+                .Where(x =>
+                    x.CreatedAtUtc >= fromUtc &&
+                    x.CreatedAtUtc < toUtc);
+
+            var result = new EmailDeliveryMetricsDto
+            {
+                FromUtc = fromUtc,
+                ToUtc = toUtc,
+
+                TotalCount = await query.CountAsync(cancellationToken),
+
+                PendingCount = await query.CountAsync(
+                    x => x.Status == EmailNotificationStatus.Pending,
+                    cancellationToken),
+
+                ProcessingCount = await query.CountAsync(
+                    x => x.Status == EmailNotificationStatus.Processing,
+                    cancellationToken),
+
+                SentCount = await query.CountAsync(
+                    x => x.Status == EmailNotificationStatus.Sent,
+                    cancellationToken),
+
+                FailedCount = await query.CountAsync(
+                    x => x.Status == EmailNotificationStatus.Failed,
+                    cancellationToken),
+
+                DeadLetterCount = await query.CountAsync(
+                    x => x.Status == EmailNotificationStatus.DeadLetter,
+                    cancellationToken)
+            };
+
+            result.DailyMetrics = await query
+                .Where(x =>
+                    x.Status == EmailNotificationStatus.Sent ||
+                    x.Status == EmailNotificationStatus.Failed ||
+                    x.Status == EmailNotificationStatus.DeadLetter)
+                .GroupBy(x => x.CreatedAtUtc.Date)
+                .Select(g => new DailyEmailDeliveryMetricDto
+                {
+                    DateUtc = g.Key,
+
+                    SentCount = g.Count(
+                        x => x.Status == EmailNotificationStatus.Sent),
+
+                    FailedCount = g.Count(
+                        x => x.Status == EmailNotificationStatus.Failed),
+
+                    DeadLetterCount = g.Count(
+                        x => x.Status == EmailNotificationStatus.DeadLetter)
+                })
+                .OrderBy(x => x.DateUtc)
+                .ToListAsync(cancellationToken);
+
+            result.EventMetrics = await query
+                .GroupBy(x => x.EventType)
+                .Select(g => new EventEmailDeliveryMetricDto
+                {
+                    EventType = g.Key,
+
+                    TotalCount = g.Count(),
+
+                    SentCount = g.Count(
+                        x => x.Status == EmailNotificationStatus.Sent),
+
+                    FailedCount = g.Count(
+                        x => x.Status == EmailNotificationStatus.Failed),
+
+                    DeadLetterCount = g.Count(
+                        x => x.Status == EmailNotificationStatus.DeadLetter)
+                })
+                .OrderByDescending(x => x.TotalCount)
+                .ToListAsync(cancellationToken);
+
+            return result;
         }
 
         private void ValidateConfiguration()
