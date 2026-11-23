@@ -475,6 +475,13 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                         transaction,
                         cancellationToken);
                 }
+                else
+                {
+                    // Reservation-based bookings are automatically approved.
+                    await QueueVCMeetingInvitationsAsync(
+                        booking,
+                        cancellationToken);
+                }
 
                 // Persist outbox records in the same transaction.
                 await _db.SaveChangesAsync(cancellationToken);
@@ -987,6 +994,11 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     dto.Remarks,
                     cancellationToken);
 
+                // Send separate VC invitations to selected participants.
+                await QueueVCMeetingInvitationsAsync(
+                    booking,
+                    cancellationToken);
+
                 // Persist outbox notification in the same transaction.
                 await _db.SaveChangesAsync(cancellationToken);
 
@@ -1448,6 +1460,77 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     CreatedAtUtc = now,
                     UpdatedAtUtc = now
                 });
+        }
+
+
+        private async Task QueueVCMeetingInvitationsAsync(
+            Booking booking,
+            CancellationToken cancellationToken)
+        {
+            var now = DateTime.UtcNow;
+
+            // A VC invitation is required only when VC details exist.
+            var hasVCDetails = await _db.BookingVCDetails
+                .AnyAsync(
+                    x => x.BookingId == booking.BookingId,
+                    cancellationToken);
+
+            if (!hasVCDetails)
+                return;
+
+            // Get active, selected participants having an email address.
+            var participants = await _db.BookingParticipants
+                .AsNoTracking()
+                .Where(x =>
+                    x.BookingId == booking.BookingId &&
+                    x.IsActive &&
+                    x.ParticipantEmail != null &&
+                    x.ParticipantEmail != "")
+                .Select(x => new
+                {
+                    x.BookingParticipantId,
+                    x.ParticipantEmail
+                })
+                .ToListAsync(cancellationToken);
+
+            // One invitation per unique email address.
+            var uniqueParticipants = participants
+                .Where(x => !string.IsNullOrWhiteSpace(x.ParticipantEmail))
+                .GroupBy(
+                    x => x.ParticipantEmail!.Trim(),
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.First())
+                .ToList();
+
+            foreach (var participant in uniqueParticipants)
+            {
+                var payload = new
+                {
+                    BookingId = booking.BookingId,
+                    BookingParticipantId = participant.BookingParticipantId
+                };
+
+                _db.EmailNotificationOutbox.Add(
+                    new EmailNotificationOutbox
+                    {
+                        EventType = "VCMeetingInvitation",
+                        ToEmail = participant.ParticipantEmail!.Trim(),
+                        CcEmail = null,
+                        BccEmail = null,
+                        Subject = null,
+
+                        // No VC credentials are stored in the outbox payload.
+                        PayloadJson = JsonSerializer.Serialize(payload),
+
+                        Status = EmailNotificationStatus.Pending,
+                        AttemptCount = 0,
+                        MaxAttempts = 5,
+                        NextAttemptAtUtc = now,
+
+                        CreatedAtUtc = now,
+                        UpdatedAtUtc = now
+                    });
+            }
         }
 
 

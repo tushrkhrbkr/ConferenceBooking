@@ -4,8 +4,11 @@ using ConferenceBooking.Services.EmailAPI.Models.Dto;
 using ConferenceBooking.Services.EmailAPI.Service.IService;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Data;
+using System.Globalization;
 using System.Net;
 using System.Net.Mail;
+using System.Text;
 using System.Text.Json;
 
 namespace ConferenceBooking.Services.EmailAPI.Service
@@ -58,7 +61,15 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                     $"No active email template found for event '{notification.EventType}'.");
             }
 
-            var replacements = BuildReplacements(notification);
+            var replacements =
+                string.Equals(
+                    notification.EventType,
+                    "VCMeetingInvitation",
+                    StringComparison.OrdinalIgnoreCase)
+                ? await BuildVCMeetingInvitationReplacementsAsync(
+                    notification,
+                    cancellationToken)
+                : BuildReplacements(notification);
 
             var subject = ReplacePlaceholders(
                 template.SubjectTemplate,
@@ -100,6 +111,7 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                 "BookingApproved" => "BOOKING_APPROVED",
                 "BookingRejected" => "BOOKING_REJECTED",
                 "BookingCancelled" => "BOOKING_CANCELLED",
+                "VCMeetingInvitation" => "VC_MEETING_INVITATION",
 
                 "ModificationSubmitted" => "MODIFICATION_SUBMITTED",
                 "ModificationWithdrawn" => "MODIFICATION_WITHDRAWN",
@@ -445,6 +457,181 @@ namespace ConferenceBooking.Services.EmailAPI.Service
         }
 
         // Booking related Email Templates //
+
+        private async Task<Dictionary<string, string>>
+            BuildVCMeetingInvitationReplacementsAsync(
+                EmailNotificationOutbox notification,
+                CancellationToken cancellationToken)
+        {
+            var payload =
+                JsonSerializer.Deserialize<VCMeetingInvitationEmailDto>(
+                    notification.PayloadJson,
+                    JsonOptions);
+
+            if (payload == null ||
+                payload.BookingId <= 0 ||
+                payload.BookingParticipantId <= 0)
+            {
+                throw new InvalidOperationException(
+                    "Invalid VC meeting invitation payload.");
+            }
+
+            var connection = _db.Database.GetDbConnection();
+            var closeConnection = connection.State != ConnectionState.Open;
+
+            if (closeConnection)
+                await connection.OpenAsync(cancellationToken);
+
+            try
+            {
+                await using var command = connection.CreateCommand();
+
+                command.CommandText = @"
+                    SELECT
+                        p.ParticipantName,
+                        b.BookingReferenceNo,
+                        b.MeetingSubject,
+                        b.MeetingStartUtc,
+                        b.MeetingEndUtc,
+                        b.ResponsiblePersonName,
+                        b.ResponsiblePersonDesignation,
+                        b.ResponsiblePersonMobile,
+                        b.ChairedBy,
+                        h.HallName,
+                        vp.PlatformName,
+                        vc.VCMeetingIdEncrypted,
+                        vc.VCPasswordEncrypted,
+                        vc.EncryptionKeyVersion,
+                        vc.VCInstructions
+                    FROM dbo.Tbl_Booking_Header b
+                    INNER JOIN dbo.Tbl_Booking_Participant p
+                        ON p.BookingId = b.BookingId
+                    INNER JOIN dbo.Tbl_Booking_VCDetails vc
+                        ON vc.BookingId = b.BookingId
+                    INNER JOIN dbo.Tbl_Master_VCPlatform vp
+                        ON vp.VCPlatformId = vc.VCPlatformId
+                    INNER JOIN dbo.Tbl_Master_ConferenceHall h
+                        ON h.ConferenceHallId = b.ConferenceHallId
+                    WHERE b.BookingId = @BookingId
+                      AND p.BookingParticipantId = @BookingParticipantId
+                      AND p.IsActive = 1
+                      AND b.ApprovalStatus = 2
+                      AND LOWER(LTRIM(RTRIM(p.ParticipantEmail))) =
+                          LOWER(@ToEmail);";
+
+                var bookingParameter = command.CreateParameter();
+                bookingParameter.ParameterName = "@BookingId";
+                bookingParameter.DbType = DbType.Int64;
+                bookingParameter.Value = payload.BookingId;
+                command.Parameters.Add(bookingParameter);
+
+                var participantParameter = command.CreateParameter();
+                participantParameter.ParameterName = "@BookingParticipantId";
+                participantParameter.DbType = DbType.Int64;
+                participantParameter.Value = payload.BookingParticipantId;
+                command.Parameters.Add(participantParameter);
+
+                var emailParameter = command.CreateParameter();
+                emailParameter.ParameterName = "@ToEmail";
+                emailParameter.DbType = DbType.String;
+                emailParameter.Value = notification.ToEmail.Trim();
+                command.Parameters.Add(emailParameter);
+
+                await using var reader =
+                    await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    throw new InvalidOperationException(
+                        "Approved booking, active participant or VC details were not found.");
+                }
+
+                var participantName = reader.GetString(0);
+                var bookingReference = reader.GetString(1);
+                var meetingSubject = reader.GetString(2);
+                var meetingStartUtc = reader.GetDateTime(3);
+                var meetingEndUtc = reader.GetDateTime(4);
+                var coordinatorName = reader.GetString(5);
+                var coordinatorDesignation = reader.GetString(6);
+                var coordinatorMobile = reader.GetString(7);
+                var chairedBy = reader.GetString(8);
+                var hallName = reader.GetString(9);
+                var platformName = reader.GetString(10);
+
+                var meetingIdBytes = reader.GetFieldValue<byte[]>(11);
+                var passwordBytes = reader.GetFieldValue<byte[]>(12);
+                var keyVersion = reader.GetString(13);
+                var instructions = reader.IsDBNull(14)
+                    ? string.Empty
+                    : reader.GetString(14);
+
+                // Current BookingAPI implementation stores credentials as PLAIN.
+                // Do not silently interpret an unknown encryption format.
+                if (!string.Equals(
+                        keyVersion,
+                        "PLAIN",
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Unsupported VC credential storage format.");
+                }
+
+                var meetingId = Encoding.UTF8.GetString(meetingIdBytes);
+                var meetingPassword = Encoding.UTF8.GetString(passwordBytes);
+
+                if (string.IsNullOrWhiteSpace(meetingId) ||
+                    string.IsNullOrWhiteSpace(meetingPassword))
+                {
+                    throw new InvalidOperationException(
+                        "VC meeting credentials are missing.");
+                }
+
+                var indiaTimeZone =
+                    TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+
+                var meetingStart = TimeZoneInfo.ConvertTimeFromUtc(
+                    DateTime.SpecifyKind(
+                        meetingStartUtc,
+                        DateTimeKind.Utc),
+                    indiaTimeZone);
+
+                var meetingEnd = TimeZoneInfo.ConvertTimeFromUtc(
+                    DateTime.SpecifyKind(
+                        meetingEndUtc,
+                        DateTimeKind.Utc),
+                    indiaTimeZone);
+
+                var replacements = new Dictionary<string, string>(
+                    StringComparer.OrdinalIgnoreCase)
+                {
+                    ["RecipientName"] = participantName,
+                    ["BookingReference"] = bookingReference,
+                    ["MeetingSubject"] = meetingSubject,
+                    ["HallName"] = hallName,
+                    ["MeetingStart"] = meetingStart.ToString(
+                        "dd MMM yyyy, hh:mm tt",
+                        CultureInfo.InvariantCulture) + " IST",
+                    ["MeetingEnd"] = meetingEnd.ToString(
+                        "dd MMM yyyy, hh:mm tt",
+                        CultureInfo.InvariantCulture) + " IST",
+                    ["ChairedBy"] = chairedBy,
+                    ["PlatformName"] = platformName,
+                    ["VCMeetingId"] = meetingId,
+                    ["VCPassword"] = meetingPassword,
+                    ["VCInstructions"] = instructions,
+                    ["CoordinatorName"] = coordinatorName,
+                    ["CoordinatorDesignation"] = coordinatorDesignation,
+                    ["CoordinatorMobile"] = coordinatorMobile
+                };
+
+                return replacements;
+            }
+            finally
+            {
+                if (closeConnection)
+                    await connection.CloseAsync();
+            }
+        }
 
         private static void AddBookingLifecycleReplacements(EmailNotificationOutbox notification, Dictionary<string, string> replacements)
         {
