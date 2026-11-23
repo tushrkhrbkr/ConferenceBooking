@@ -475,13 +475,23 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                         transaction,
                         cancellationToken);
                 }
+
                 else
                 {
                     // Reservation-based bookings are automatically approved.
+                    // Notify the original requester using the existing approval template.
+                    await QueueBookingApprovedNotificationAsync(
+                        booking,
+                        "SYSTEM",
+                        "This booking was automatically approved under the reservation.",
+                        cancellationToken);
+
+                    // Send separate VC invitations to selected participants.
                     await QueueVCMeetingInvitationsAsync(
                         booking,
                         cancellationToken);
                 }
+
 
                 // Persist outbox records in the same transaction.
                 await _db.SaveChangesAsync(cancellationToken);
