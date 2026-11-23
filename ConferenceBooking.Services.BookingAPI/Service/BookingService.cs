@@ -1,12 +1,14 @@
-﻿using System.Data;
-using System.Text;
-using ConferenceBooking.Services.BookingAPI.Data;
+﻿using ConferenceBooking.Services.BookingAPI.Data;
 using ConferenceBooking.Services.BookingAPI.Enums;
 using ConferenceBooking.Services.BookingAPI.Models;
 using ConferenceBooking.Services.BookingAPI.Models.Dto;
 using ConferenceBooking.Services.BookingAPI.Service.IService;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
 
 namespace ConferenceBooking.Services.BookingAPI.Service
 {
@@ -459,7 +461,24 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     CreatedAtUtc = now
                 });
 
+                // Persist booking and all associated records first.
                 await _db.SaveChangesAsync(cancellationToken);
+
+                // Queue submission notifications only for bookings requiring approval.
+                // Automatically approved reservation bookings will be handled
+                // by the BookingApproved notification integration.
+                if (!automaticallyApproved)
+                {
+                    await QueueBookingSubmittedNotificationsAsync(
+                        booking,
+                        profile,
+                        transaction,
+                        cancellationToken);
+                }
+
+                // Persist outbox records in the same transaction.
+                await _db.SaveChangesAsync(cancellationToken);
+
                 await transaction.CommitAsync(cancellationToken);
 
                 response.IsSuccess = true;
@@ -1129,6 +1148,188 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
             return await IsAssignedSubAdmin(hallId, cancellationToken);
         }
+
+
+        private async Task QueueBookingSubmittedNotificationsAsync(
+            Booking booking,
+            UserProfile requester,
+            IDbContextTransaction transaction,
+            CancellationToken cancellationToken)
+        {
+            var now = DateTime.UtcNow;
+
+            var recipients = new List<(string Name, string Email)>();
+
+            // 1. Resolve active Admin users through ASP.NET Core Identity tables.
+            // Only active profiles with valid email addresses are eligible.
+            var connection = _db.Database.GetDbConnection();
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction.GetDbTransaction();
+
+                command.CommandText = @"
+            SELECT DISTINCT
+                p.DisplayName,
+                p.Username,
+                p.EmailAddress
+            FROM dbo.AspNetUserRoles ur
+            INNER JOIN dbo.AspNetRoles r
+                ON r.Id = ur.RoleId
+            INNER JOIN dbo.Tbl_UserProfile p
+                ON p.UserId = ur.UserId
+            WHERE UPPER(r.Name) = N'ADMIN'
+              AND p.IsActive = 1
+              AND NULLIF(LTRIM(RTRIM(p.EmailAddress)), '') IS NOT NULL;";
+
+                await using var reader =
+                    await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var displayName = reader.IsDBNull(0)
+                        ? string.Empty
+                        : reader.GetString(0);
+
+                    var username = reader.IsDBNull(1)
+                        ? string.Empty
+                        : reader.GetString(1);
+
+                    var email = reader.IsDBNull(2)
+                        ? string.Empty
+                        : reader.GetString(2).Trim();
+
+                    if (!string.IsNullOrWhiteSpace(email))
+                    {
+                        recipients.Add((
+                            string.IsNullOrWhiteSpace(displayName)
+                                ? username
+                                : displayName,
+                            email));
+                    }
+                }
+            }
+
+            // 2. Resolve only the active SubAdmins assigned to this hall.
+            var subAdminRecipients = await (
+                from map in _db.HallSubAdminMaps
+                join user in _db.UserProfiles
+                    on map.UserId equals user.UserId
+                where map.ConferenceHallId == booking.ConferenceHallId
+                      && map.IsActive
+                      && map.EffectiveFromUtc <= now
+                      && (!map.EffectiveToUtc.HasValue ||
+                          map.EffectiveToUtc >= now)
+                      && user.IsActive
+                      && user.EmailAddress != ""
+                select new
+                {
+                    user.DisplayName,
+                    user.Username,
+                    user.EmailAddress
+                }
+            )
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+            foreach (var user in subAdminRecipients)
+            {
+                if (!string.IsNullOrWhiteSpace(user.EmailAddress))
+                {
+                    recipients.Add((
+                        string.IsNullOrWhiteSpace(user.DisplayName)
+                            ? user.Username
+                            : user.DisplayName,
+                        user.EmailAddress.Trim()));
+                }
+            }
+
+            // 3. Deduplicate recipients by email address.
+            var uniqueRecipients = recipients
+                .Where(x => !string.IsNullOrWhiteSpace(x.Email))
+                .GroupBy(
+                    x => x.Email,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.First())
+                .ToList();
+
+            if (uniqueRecipients.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "No active Admin or assigned SubAdmin email recipients " +
+                    "were found for this booking.");
+            }
+
+            // 4. Resolve hall name.
+            var hallName = await _db.ConferenceHalls
+                .AsNoTracking()
+                .Where(x => x.ConferenceHallId == booking.ConferenceHallId)
+                .Select(x => x.HallName)
+                .FirstAsync(cancellationToken);
+
+            // 5. Format meeting timings in Indian Standard Time.
+            var indiaTimeZone =
+                TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+
+            var meetingStart = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingStartUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var meetingEnd = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingEndUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var startText = meetingStart.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                CultureInfo.InvariantCulture) + " IST";
+
+            var endText = meetingEnd.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                CultureInfo.InvariantCulture) + " IST";
+
+            // 6. Create one outbox notification per recipient.
+            foreach (var recipient in uniqueRecipients)
+            {
+                var payload = new
+                {
+                    RecipientName = recipient.Name,
+                    RequesterName = requester.DisplayName,
+                    BookingReference = booking.BookingReferenceNo,
+                    MeetingSubject = booking.MeetingSubject,
+                    HallName = hallName,
+                    MeetingStart = startText,
+                    MeetingEnd = endText,
+                    ActionBy = requester.DisplayName,
+                    Remarks = "A new booking request has been submitted " +
+                              "and is awaiting approval."
+                };
+
+                _db.EmailNotificationOutbox.Add(
+                    new EmailNotificationOutbox
+                    {
+                        EventType = "BookingSubmitted",
+                        ToEmail = recipient.Email,
+                        CcEmail = null,
+                        BccEmail = null,
+                        Subject = null,
+
+                        PayloadJson = JsonSerializer.Serialize(payload),
+
+                        Status = EmailNotificationStatus.Pending,
+                        AttemptCount = 0,
+                        MaxAttempts = 5,
+                        NextAttemptAtUtc = now,
+
+                        CreatedAtUtc = now,
+                        UpdatedAtUtc = now
+                    });
+            }
+        }
+
 
         private async Task<bool> IsAssignedSubAdmin(
             int hallId,
