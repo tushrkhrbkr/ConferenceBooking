@@ -348,6 +348,15 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     CreatedAtUtc = now
                 });
 
+                await QueueModificationAdminNotificationsAsync(
+                    booking,
+                    request,
+                    actorId,
+                    "ModificationSubmitted",
+                    request.ChangeReason,
+                    transaction,
+                    cancellationToken);
+
                 await _db.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
 
@@ -512,6 +521,15 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     Remarks = request.ChangeReason,
                     CreatedAtUtc = now
                 });
+
+                await QueueModificationAdminNotificationsAsync(
+                    booking,
+                    request,
+                    actorId,
+                    "ModificationWithdrawn",
+                    request.ReviewRemarks ?? request.ChangeReason,
+                    transaction,
+                    cancellationToken);
 
                 await _db.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
@@ -1584,6 +1602,219 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
             return Convert.ToInt32(result);
         }
+
+
+        private async Task QueueModificationAdminNotificationsAsync(
+            Booking booking,
+            BookingModificationRequest request,
+            string actorId,
+            string eventType,
+            string remarks,
+            IDbContextTransaction transaction,
+            CancellationToken cancellationToken)
+        {
+            var now = DateTime.UtcNow;
+            var recipients = new List<(string Name, string Email)>();
+
+            void AddRecipient(string? name, string? username, string? email)
+            {
+                if (string.IsNullOrWhiteSpace(email))
+                    return;
+
+                var displayName = !string.IsNullOrWhiteSpace(name)
+                    ? name.Trim()
+                    : !string.IsNullOrWhiteSpace(username)
+                        ? username.Trim()
+                        : "User";
+
+                recipients.Add((displayName, email.Trim()));
+            }
+
+            // Resolve original requester.
+            var requester = await _db.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.UserId == request.RequestedByUserId,
+                    cancellationToken);
+
+            var requesterName = requester == null
+                ? "Booking requester"
+                : !string.IsNullOrWhiteSpace(requester.DisplayName)
+                    ? requester.DisplayName
+                    : requester.Username;
+
+            // Resolve submitting/withdrawing officer.
+            var actor = await _db.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.UserId == actorId,
+                    cancellationToken);
+
+            var actionBy = actor == null
+                ? "Conference Administration"
+                : !string.IsNullOrWhiteSpace(actor.DisplayName)
+                    ? actor.DisplayName
+                    : actor.Username;
+
+            // 1. All active Admin users.
+            var connection = _db.Database.GetDbConnection();
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction.GetDbTransaction();
+
+                command.CommandText = @"
+            SELECT DISTINCT
+                p.DisplayName,
+                p.Username,
+                p.EmailAddress
+            FROM dbo.AspNetUserRoles ur
+            INNER JOIN dbo.AspNetRoles r
+                ON r.Id = ur.RoleId
+            INNER JOIN dbo.Tbl_UserProfile p
+                ON p.UserId = ur.UserId
+            WHERE UPPER(r.Name) = N'ADMIN'
+              AND p.IsActive = 1
+              AND NULLIF(LTRIM(RTRIM(p.EmailAddress)), '') IS NOT NULL;";
+
+                await using var reader =
+                    await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var name = reader.IsDBNull(0)
+                        ? null
+                        : reader.GetString(0);
+
+                    var username = reader.IsDBNull(1)
+                        ? null
+                        : reader.GetString(1);
+
+                    var email = reader.IsDBNull(2)
+                        ? null
+                        : reader.GetString(2);
+
+                    AddRecipient(name, username, email);
+                }
+            }
+
+            // 2. Relevant SubAdmins for both original and proposed halls.
+            // Both halls are relevant because the modification affects the
+            // original booking location and the proposed location.
+            var relevantHallIds = new[]
+            {
+        booking.ConferenceHallId,
+        request.ProposedHallId
+    }
+            .Distinct()
+            .ToArray();
+
+            var subAdmins = await (
+                from map in _db.HallSubAdminMaps.AsNoTracking()
+                join profile in _db.UserProfiles.AsNoTracking()
+                    on map.UserId equals profile.UserId
+                where relevantHallIds.Contains(map.ConferenceHallId)
+                      && map.IsActive
+                      && map.EffectiveFromUtc <= now
+                      && (!map.EffectiveToUtc.HasValue ||
+                          map.EffectiveToUtc.Value > now)
+                      && profile.IsActive
+                select new
+                {
+                    profile.DisplayName,
+                    profile.Username,
+                    profile.EmailAddress
+                }
+            ).ToListAsync(cancellationToken);
+
+            foreach (var subAdmin in subAdmins)
+            {
+                AddRecipient(
+                    subAdmin.DisplayName,
+                    subAdmin.Username,
+                    subAdmin.EmailAddress);
+            }
+
+            // 3. Deduplicate by email address.
+            var uniqueRecipients = recipients
+                .GroupBy(
+                    x => x.Email,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.First())
+                .ToList();
+
+            // 4. Resolve proposed hall name.
+            var hallName = await _db.ConferenceHalls
+                .AsNoTracking()
+                .Where(x => x.ConferenceHallId == request.ProposedHallId)
+                .Select(x => x.HallName)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? "Conference Hall";
+
+            // 5. Format proposed meeting timings in IST.
+            var indiaTimeZone =
+                TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+
+            var proposedStart = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    request.ProposedStartUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var proposedEnd = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    request.ProposedEndUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var startText = proposedStart.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                System.Globalization.CultureInfo.InvariantCulture) + " IST";
+
+            var endText = proposedEnd.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                System.Globalization.CultureInfo.InvariantCulture) + " IST";
+
+            var meetingSubject =
+                !string.IsNullOrWhiteSpace(request.ProposedSubject)
+                    ? request.ProposedSubject
+                    : booking.MeetingSubject;
+
+            // 6. Create one outbox event per recipient.
+            foreach (var recipient in uniqueRecipients)
+            {
+                var payload = new
+                {
+                    RecipientName = recipient.Name,
+                    RequesterName = requesterName,
+                    BookingReference = booking.BookingReferenceNo,
+                    MeetingSubject = meetingSubject,
+                    HallName = hallName,
+                    MeetingStart = startText,
+                    MeetingEnd = endText,
+                    ActionBy = actionBy,
+                    Remarks = remarks
+                };
+
+                _db.EmailNotificationOutbox.Add(
+                    new EmailNotificationOutbox
+                    {
+                        EventType = eventType,
+                        ToEmail = recipient.Email,
+                        CcEmail = null,
+                        BccEmail = null,
+                        Subject = null,
+                        PayloadJson = JsonSerializer.Serialize(payload),
+                        Status = EmailNotificationStatus.Pending,
+                        AttemptCount = 0,
+                        MaxAttempts = 5,
+                        NextAttemptAtUtc = now,
+                        CreatedAtUtc = now,
+                        UpdatedAtUtc = now
+                    });
+            }
+        }
+
 
         private async Task<bool> IsAssignedSubAdmin(
             int hallId,
