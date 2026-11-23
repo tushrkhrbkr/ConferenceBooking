@@ -921,6 +921,30 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     return Failure(409, "Another active modification hold conflicts with this slot.");
                 }
 
+
+                // Capture existing participants before applying the replacement snapshot.
+                // This is required to identify participants removed by the approved change.
+                var previousParticipantRows = await _db.BookingParticipants
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.BookingId == booking.BookingId &&
+                        x.IsActive &&
+                        x.ParticipantEmail != null &&
+                        x.ParticipantEmail != "")
+                    .Select(x => new
+                    {
+                        Name = x.ParticipantName,
+                        Email = x.ParticipantEmail!.Trim()
+                    })
+                    .ToListAsync(cancellationToken);
+
+                // Convert to tuples after the EF Core query has executed.
+                var previousParticipants = previousParticipantRows
+                    .Select(x => (Name: x.Name, Email: x.Email))
+                    .ToList();
+
+
+
                 // Apply the proposed booking details.
                 var oldValues = new
                 {
@@ -956,6 +980,7 @@ namespace ConferenceBooking.Services.BookingAPI.Service
 
                 booking.UpdatedAtUtc = now;
                 booking.UpdatedByUserId = actorId;
+
 
                 // null snapshot = retain existing participants.
                 // [] snapshot = remove all existing participants.
@@ -1240,7 +1265,21 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     request.ReviewRemarks ?? request.ChangeReason,
                     cancellationToken);
 
+                // Persist the approved booking and resulting participant list.
+                // This also assigns IDs to newly inserted participants.
                 await _db.SaveChangesAsync(cancellationToken);
+
+                // Queue updated VC invitations and notices to removed participants.
+                await QueueModifiedVCParticipantNotificationsAsync(
+                    booking,
+                    previousParticipants,
+                    actorId,
+                    request.ChangeReason,
+                    cancellationToken);
+
+                // Persist notification outbox entries atomically.
+                await _db.SaveChangesAsync(cancellationToken);
+
                 await transaction.CommitAsync(cancellationToken);
 
                 return new ResponseDto
@@ -1821,6 +1860,293 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                         BccEmail = null,
                         Subject = null,
                         PayloadJson = JsonSerializer.Serialize(payload),
+                        Status = EmailNotificationStatus.Pending,
+                        AttemptCount = 0,
+                        MaxAttempts = 5,
+                        NextAttemptAtUtc = now,
+                        CreatedAtUtc = now,
+                        UpdatedAtUtc = now
+                    });
+            }
+        }
+
+
+        private async Task QueueModificationRequesterNotificationAsync(
+            Booking booking,
+            BookingModificationRequest request,
+            string actionByUserId,
+            string eventType,
+            string remarks,
+            CancellationToken cancellationToken)
+        {
+            var now = DateTime.UtcNow;
+
+            // Always notify the original booking requester.
+            var requester = await _db.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.UserId == booking.RequestedByUserId &&
+                         x.IsActive,
+                    cancellationToken);
+
+            // Missing requester email must not block approval or rejection.
+            if (requester == null ||
+                string.IsNullOrWhiteSpace(requester.EmailAddress))
+            {
+                return;
+            }
+
+            var requesterName =
+                !string.IsNullOrWhiteSpace(requester.DisplayName)
+                    ? requester.DisplayName
+                    : requester.Username;
+
+            // Resolve the officer who approved or rejected the request.
+            var actionByProfile = await _db.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.UserId == actionByUserId,
+                    cancellationToken);
+
+            var actionBy =
+                actionByProfile == null
+                    ? "Conference Administration"
+                    : !string.IsNullOrWhiteSpace(actionByProfile.DisplayName)
+                        ? actionByProfile.DisplayName
+                        : actionByProfile.Username;
+
+            // The booking contains the resulting details after approval.
+            // After rejection, it still contains the original details.
+            var hallName = await _db.ConferenceHalls
+                .AsNoTracking()
+                .Where(x => x.ConferenceHallId == booking.ConferenceHallId)
+                .Select(x => x.HallName)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? "Conference Hall";
+
+            var indiaTimeZone =
+                TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+
+            var meetingStart = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingStartUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var meetingEnd = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingEndUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var startText = meetingStart.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                System.Globalization.CultureInfo.InvariantCulture) + " IST";
+
+            var endText = meetingEnd.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                System.Globalization.CultureInfo.InvariantCulture) + " IST";
+
+            var payload = new
+            {
+                RecipientName = requesterName,
+                RequesterName = requesterName,
+                BookingReference = booking.BookingReferenceNo,
+                MeetingSubject = booking.MeetingSubject,
+                HallName = hallName,
+                MeetingStart = startText,
+                MeetingEnd = endText,
+                ActionBy = actionBy,
+                Remarks = remarks
+            };
+
+            _db.EmailNotificationOutbox.Add(
+                new EmailNotificationOutbox
+                {
+                    EventType = eventType,
+                    ToEmail = requester.EmailAddress.Trim(),
+                    CcEmail = null,
+                    BccEmail = null,
+                    Subject = null,
+                    PayloadJson = JsonSerializer.Serialize(payload),
+                    Status = EmailNotificationStatus.Pending,
+                    AttemptCount = 0,
+                    MaxAttempts = 5,
+                    NextAttemptAtUtc = now,
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now
+                });
+        }
+
+
+        private async Task QueueModifiedVCParticipantNotificationsAsync(
+            Booking booking,
+            List<(string Name, string Email)> previousParticipants,
+            string approvedByUserId,
+            string changeReason,
+            CancellationToken cancellationToken)
+        {
+            var now = DateTime.UtcNow;
+
+            // VC invitations are applicable only when the approved booking
+            // has VC details.
+            var hasVCDetails = await _db.BookingVCDetails
+                .AnyAsync(
+                    x => x.BookingId == booking.BookingId,
+                    cancellationToken);
+
+            if (!hasVCDetails)
+                return;
+
+            // Load the resulting active participant list after modification.
+            var currentParticipants = await _db.BookingParticipants
+                .AsNoTracking()
+                .Where(x =>
+                    x.BookingId == booking.BookingId &&
+                    x.IsActive &&
+                    x.ParticipantEmail != null &&
+                    x.ParticipantEmail != "")
+                .Select(x => new
+                {
+                    x.BookingParticipantId,
+                    x.ParticipantName,
+                    x.ParticipantEmail
+                })
+                .ToListAsync(cancellationToken);
+
+            // Deduplicate resulting participants by email.
+            var uniqueCurrentParticipants = currentParticipants
+                .Where(x => !string.IsNullOrWhiteSpace(x.ParticipantEmail))
+                .GroupBy(
+                    x => x.ParticipantEmail!.Trim(),
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.First())
+                .ToList();
+
+            // Send updated invitations to every participant in the resulting list.
+            // The dispatcher retrieves the current VC credentials at delivery time.
+            foreach (var participant in uniqueCurrentParticipants)
+            {
+                var invitationPayload = new
+                {
+                    BookingId = booking.BookingId,
+                    BookingParticipantId = participant.BookingParticipantId
+                };
+
+                _db.EmailNotificationOutbox.Add(
+                    new EmailNotificationOutbox
+                    {
+                        EventType = "VCMeetingInvitation",
+                        ToEmail = participant.ParticipantEmail!.Trim(),
+                        CcEmail = null,
+                        BccEmail = null,
+                        Subject = null,
+
+                        // Never include VC credentials in the outbox payload.
+                        PayloadJson = JsonSerializer.Serialize(invitationPayload),
+
+                        Status = EmailNotificationStatus.Pending,
+                        AttemptCount = 0,
+                        MaxAttempts = 5,
+                        NextAttemptAtUtc = now,
+                        CreatedAtUtc = now,
+                        UpdatedAtUtc = now
+                    });
+            }
+
+            // Identify removed participants by email address.
+            var currentEmailSet = new HashSet<string>(
+                uniqueCurrentParticipants
+                    .Select(x => x.ParticipantEmail!.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+
+            var removedParticipants = previousParticipants
+                .Where(x =>
+                    !string.IsNullOrWhiteSpace(x.Email) &&
+                    !currentEmailSet.Contains(x.Email.Trim()))
+                .GroupBy(
+                    x => x.Email.Trim(),
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.First())
+                .ToList();
+
+            // Resolve the approving officer.
+            var approvingOfficer = await _db.UserProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.UserId == approvedByUserId,
+                    cancellationToken);
+
+            var actionBy = approvingOfficer == null
+                ? "Conference Administration"
+                : !string.IsNullOrWhiteSpace(approvingOfficer.DisplayName)
+                    ? approvingOfficer.DisplayName
+                    : approvingOfficer.Username;
+
+            // Resolve the resulting hall.
+            var hallName = await _db.ConferenceHalls
+                .AsNoTracking()
+                .Where(x => x.ConferenceHallId == booking.ConferenceHallId)
+                .Select(x => x.HallName)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? "Conference Hall";
+
+            // Format resulting meeting timings in IST.
+            var indiaTimeZone =
+                TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+
+            var meetingStart = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingStartUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var meetingEnd = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(
+                    booking.MeetingEndUtc,
+                    DateTimeKind.Utc),
+                indiaTimeZone);
+
+            var startText = meetingStart.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                System.Globalization.CultureInfo.InvariantCulture) + " IST";
+
+            var endText = meetingEnd.ToString(
+                "dd MMM yyyy, hh:mm tt",
+                System.Globalization.CultureInfo.InvariantCulture) + " IST";
+
+            // Notify removed participants separately.
+            foreach (var participant in removedParticipants)
+            {
+                var payload = new
+                {
+                    RecipientName = string.IsNullOrWhiteSpace(participant.Name)
+                        ? "Participant"
+                        : participant.Name,
+
+                    RequesterName = booking.ResponsiblePersonName,
+                    BookingReference = booking.BookingReferenceNo,
+                    MeetingSubject = booking.MeetingSubject,
+                    HallName = hallName,
+                    MeetingStart = startText,
+                    MeetingEnd = endText,
+                    ActionBy = actionBy,
+
+                    Remarks = string.IsNullOrWhiteSpace(changeReason)
+                        ? "The approved modification has removed you from the meeting participant list. You are no longer an invited participant."
+                        : "The approved modification has removed you from the meeting participant list. You are no longer an invited participant. Reason: " + changeReason.Trim()
+                };
+
+                _db.EmailNotificationOutbox.Add(
+                    new EmailNotificationOutbox
+                    {
+                        EventType = "VCMeetingCancelled",
+                        ToEmail = participant.Email.Trim(),
+                        CcEmail = null,
+                        BccEmail = null,
+                        Subject = null,
+                        PayloadJson = JsonSerializer.Serialize(payload),
+
                         Status = EmailNotificationStatus.Pending,
                         AttemptCount = 0,
                         MaxAttempts = 5,

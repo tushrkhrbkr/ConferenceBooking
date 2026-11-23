@@ -111,7 +111,9 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                 "BookingApproved" => "BOOKING_APPROVED",
                 "BookingRejected" => "BOOKING_REJECTED",
                 "BookingCancelled" => "BOOKING_CANCELLED",
+
                 "VCMeetingInvitation" => "VC_MEETING_INVITATION",
+                "VCMeetingCancelled" => "VC_MEETING_CANCELLED",
 
                 "ModificationSubmitted" => "MODIFICATION_SUBMITTED",
                 "ModificationWithdrawn" => "MODIFICATION_WITHDRAWN",
@@ -175,6 +177,12 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                 case "ModificationWithdrawn":
                 case "ModificationApproved":
                 case "ModificationRejected":
+                    {
+                        AddBookingLifecycleReplacements(notification, replacements);
+                        break;
+                    }
+
+                case "VCMeetingCancelled":
                     {
                         AddBookingLifecycleReplacements(notification, replacements);
                         break;
