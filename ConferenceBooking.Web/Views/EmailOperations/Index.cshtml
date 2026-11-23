@@ -559,42 +559,80 @@
             }
 
             // Event-wise chart
-            if (eventData && eventData.length > 0) {
 
-                const eventOptions = {
-                    chart: {
-                        type: "bar",
-                        height: 320,
-                        toolbar: { show: false }
-                    },
-                    series: [
-                        {
-                            name: "Total",
-                            data: eventData.map(x => x.TotalCount)
-                        }
-                    ],
-                    plotOptions: {
-                        bar: {
-                            horizontal: true,
-                            borderRadius: 4
-                        }
-                    },
-                    xaxis: {
-                        categories: eventData.map(x => x.EventType)
-                    },
-                    dataLabels: { enabled: true },
-                    legend: { show: false }
-                };
+        // Event-wise chart
+        if (eventData && eventData.length > 0) {
 
-                new ApexCharts(
-                    document.querySelector("#emailEventChart"),
-                    eventOptions
-                ).render();
+            const eventOptions = {
+                chart: {
+                    type: "bar",
+                    height: Math.max(320, eventData.length * 48),
+                    stacked: true,
+                    toolbar: { show: true }
+                },
+                series: [
+                    {
+                        name: "Sent",
+                        data: eventData.map(x => x.SentCount)
+                    },
+                    {
+                        name: "Failed",
+                        data: eventData.map(x => x.FailedCount)
+                    },
+                    {
+                        name: "Dead Letter",
+                        data: eventData.map(x => x.DeadLetterCount)
+                    },
+                    {
+                        name: "Pending / Processing",
+                        data: eventData.map(x =>
+                            Math.max(
+                                0,
+                                x.TotalCount -
+                                x.SentCount -
+                                x.FailedCount -
+                                x.DeadLetterCount
+                            )
+                        )
+                    }
+                ],
+                plotOptions: {
+                    bar: {
+                        horizontal: true,
+                        borderRadius: 4,
+                        barHeight: "65%"
+                    }
+                },
+                xaxis: {
+                    categories: eventData.map(x => x.EventType),
+                    min: 0,
+                    forceNiceScale: true,
+                    title: {
+                        text: "Notifications"
+                    }
+                },
+                dataLabels: {
+                    enabled: false
+                },
+                legend: {
+                    position: "bottom"
+                },
+                tooltip: {
+                    shared: true,
+                    intersect: false
+                }
+            };
 
-            } else {
-                document.getElementById("emailEventChart").classList.add("d-none");
-                document.getElementById("emailEventEmpty").classList.remove("d-none");
-            }
+            new ApexCharts(
+                document.querySelector("#emailEventChart"),
+                eventOptions
+            ).render();
+
+        } else {
+            document.getElementById("emailEventChart").classList.add("d-none");
+            document.getElementById("emailEventEmpty").classList.remove("d-none");
+        }
+
 
             // Retry modal
             document.querySelectorAll(".retry-email-btn").forEach(button => {

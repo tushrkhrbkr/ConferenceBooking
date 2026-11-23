@@ -22,6 +22,7 @@ namespace ConferenceBooking.Web.Controllers
             _logger = logger;
         }
 
+
         [HttpGet]
         public async Task<IActionResult> Index(
             DateTime? fromUtc,
@@ -29,12 +30,22 @@ namespace ConferenceBooking.Web.Controllers
         {
             var now = DateTime.UtcNow;
 
+            // The dashboard date picker uses inclusive calendar dates.
             var from = DateTime.SpecifyKind(
-                fromUtc ?? now.Date.AddDays(-29),
+                (fromUtc ?? now.Date.AddDays(-29)).Date,
                 DateTimeKind.Utc);
 
+            var selectedToDate = (toUtc ?? now.Date).Date;
+
+            // Prevent overflow when converting an inclusive end date
+            // into the exclusive endpoint required by the metrics API.
+            if (selectedToDate == DateTime.MaxValue.Date)
+            {
+                return BadRequest("Select a valid end date.");
+            }
+
             var to = DateTime.SpecifyKind(
-                toUtc ?? now.Date.AddDays(1),
+                selectedToDate.AddDays(1),
                 DateTimeKind.Utc);
 
             if (to <= from || (to - from).TotalDays > 90)
@@ -55,8 +66,7 @@ namespace ConferenceBooking.Web.Controllers
                     await _emailService.GetOutboxHealthAsync();
 
                 var metricsResponse =
-                    await _emailService.GetDeliveryMetricsAsync(
-                        from, to);
+                    await _emailService.GetDeliveryMetricsAsync(from, to);
 
                 var deadLetterResponse =
                     await _emailService.GetDeadLetterNotificationsAsync();
@@ -65,8 +75,7 @@ namespace ConferenceBooking.Web.Controllers
                 {
                     model.Health =
                         JsonConvert.DeserializeObject<EmailOutboxHealthDto>(
-                            JsonConvert.SerializeObject(
-                                healthResponse.Result))
+                            JsonConvert.SerializeObject(healthResponse.Result))
                         ?? new EmailOutboxHealthDto();
                 }
 
@@ -74,8 +83,7 @@ namespace ConferenceBooking.Web.Controllers
                 {
                     model.Metrics =
                         JsonConvert.DeserializeObject<EmailDeliveryMetricsDto>(
-                            JsonConvert.SerializeObject(
-                                metricsResponse.Result))
+                            JsonConvert.SerializeObject(metricsResponse.Result))
                         ?? new EmailDeliveryMetricsDto();
                 }
 
@@ -83,8 +91,7 @@ namespace ConferenceBooking.Web.Controllers
                 {
                     model.DeadLetters =
                         JsonConvert.DeserializeObject<List<DeadLetterNotificationDto>>(
-                            JsonConvert.SerializeObject(
-                                deadLetterResponse.Result))
+                            JsonConvert.SerializeObject(deadLetterResponse.Result))
                         ?? new List<DeadLetterNotificationDto>();
                 }
 
@@ -109,6 +116,7 @@ namespace ConferenceBooking.Web.Controllers
 
             return View(model);
         }
+
 
         [HttpPost]
         [ValidateAntiForgeryToken]
