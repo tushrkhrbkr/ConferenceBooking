@@ -1232,6 +1232,14 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     CreatedAtUtc = now
                 });
 
+                await QueueModificationRequesterNotificationAsync(
+                    booking,
+                    request,
+                    actorId,
+                    "ModificationApproved",
+                    request.ReviewRemarks ?? request.ChangeReason,
+                    cancellationToken);
+
                 await _db.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
 
@@ -1379,6 +1387,14 @@ namespace ConferenceBooking.Services.BookingAPI.Service
                     Remarks = dto.ReviewRemarks ?? request.ChangeReason,
                     CreatedAtUtc = now
                 });
+
+                await QueueModificationRequesterNotificationAsync(
+                    booking,
+                    request,
+                    actorId,
+                    "ModificationRejected",
+                    request.ReviewRemarks ?? request.ChangeReason,
+                    cancellationToken);
 
                 await _db.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
