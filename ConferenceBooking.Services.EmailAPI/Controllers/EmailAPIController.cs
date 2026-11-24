@@ -194,14 +194,19 @@ namespace ConferenceBooking.Services.EmailAPI.Controllers
 
             if (request == null ||
                 !request.ConfirmRetry ||
-                string.IsNullOrWhiteSpace(request.Reason))
+                string.IsNullOrWhiteSpace(request.Reason) ||
+                request.Reason.Trim().Length < 10 ||
+                request.Reason.Trim().Length > 500 ||
+                string.IsNullOrWhiteSpace(request.OperatorUserId) ||
+                string.IsNullOrWhiteSpace(request.OperatorName))
             {
                 return BadRequest(new
                 {
                     IsSuccess = false,
-                    Message = "Explicit retry confirmation and reason are required."
+                    Message = "Retry confirmation, reason and operator identity are required."
                 });
             }
+
 
             try
             {

@@ -16,6 +16,9 @@ namespace ConferenceBooking.Web.Service.IService
 
         Task<ResponseDto?> RetryDeadLetterNotificationAsync(
             long notificationId,
-            string reason);
+            string reason,
+            string operatorUserId,
+            string operatorName);
+
     }
 }

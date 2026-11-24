@@ -11,5 +11,13 @@ namespace ConferenceBooking.Services.EmailAPI.Models.Dto
         [Required]
         [StringLength(500, MinimumLength = 10)]
         public string Reason { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(256)]
+        public string OperatorUserId { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(256)]
+        public string OperatorName { get; set; } = string.Empty;
     }
 }

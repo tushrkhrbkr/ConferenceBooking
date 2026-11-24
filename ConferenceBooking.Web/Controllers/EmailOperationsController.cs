@@ -138,10 +138,29 @@ namespace ConferenceBooking.Web.Controllers
 
             try
             {
+
+                var operatorUserId =
+                    HttpContext.Session.GetString("UserID");
+
+                var operatorName =
+                    User.Identity?.Name;
+
+                if (string.IsNullOrWhiteSpace(operatorUserId) ||
+                    string.IsNullOrWhiteSpace(operatorName))
+                {
+                    TempData["error"] =
+                        "Your administrator session is incomplete. Please sign in again.";
+
+                    return RedirectToAction(nameof(Index));
+                }
+
                 var response =
                     await _emailService.RetryDeadLetterNotificationAsync(
                         notificationId,
-                        reason.Trim());
+                        reason.Trim(),
+                        operatorUserId,
+                        operatorName);
+
 
                 if (response?.IsSuccess == true)
                 {

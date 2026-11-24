@@ -16,6 +16,8 @@ namespace ConferenceBooking.Services.EmailAPI.Data
 
         public DbSet<EmailNotificationOutbox> EmailNotificationOutbox { get; set; }
 
+        public DbSet<EmailOutboxRetryAudit> EmailOutboxRetryAudits { get; set; }
+
         protected override void OnModelCreating(
             ModelBuilder modelBuilder)
         {
@@ -37,6 +39,8 @@ namespace ConferenceBooking.Services.EmailAPI.Data
                     .HasConversion<byte>();
             });
 
+            modelBuilder.Entity<EmailOutboxRetryAudit>()
+                .ToTable("Tbl_EmailOutboxRetryAudit");
         }
 
     }

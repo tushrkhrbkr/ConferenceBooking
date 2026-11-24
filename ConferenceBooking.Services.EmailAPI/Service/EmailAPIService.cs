@@ -200,6 +200,7 @@ namespace ConferenceBooking.Services.EmailAPI.Service
                 .ToListAsync(cancellationToken);
         }
 
+
         public async Task<bool> RetryDeadLetterNotificationAsync(
             long notificationId,
             RetryDeadLetterNotificationDto request,
@@ -208,7 +209,11 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             if (notificationId <= 0 ||
                 request == null ||
                 !request.ConfirmRetry ||
-                string.IsNullOrWhiteSpace(request.Reason))
+                string.IsNullOrWhiteSpace(request.Reason) ||
+                request.Reason.Trim().Length < 10 ||
+                request.Reason.Trim().Length > 500 ||
+                string.IsNullOrWhiteSpace(request.OperatorUserId) ||
+                string.IsNullOrWhiteSpace(request.OperatorName))
             {
                 return false;
             }
@@ -251,9 +256,30 @@ namespace ConferenceBooking.Services.EmailAPI.Service
 
             var now = DateTime.UtcNow;
 
+            // Capture the previous retry state before resetting it.
+            var audit = new EmailOutboxRetryAudit
+            {
+                EmailNotificationOutboxId =
+                    notification.EmailNotificationOutboxId,
+
+                EventType = notification.EventType,
+
+                OperatorUserId = request.OperatorUserId.Trim(),
+
+                OperatorName = request.OperatorName.Trim(),
+
+                RetryReason = request.Reason.Trim(),
+
+                PreviousAttemptCount = notification.AttemptCount,
+
+                PreviousMaxAttempts = notification.MaxAttempts,
+
+                RetriedAtUtc = now
+            };
+
+            // Requeue the notification.
             notification.Status = EmailNotificationStatus.Pending;
 
-            // Reset attempts so the normal worker can process the record.
             notification.AttemptCount = 0;
 
             notification.NextAttemptAtUtc = now;
@@ -268,18 +294,25 @@ namespace ConferenceBooking.Services.EmailAPI.Service
 
             notification.UpdatedAtUtc = now;
 
+            // Both changes are persisted inside the same transaction.
+            _db.EmailOutboxRetryAudits.Add(audit);
+
             await _db.SaveChangesAsync(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
 
             _logger.LogWarning(
                 "Dead-letter notification manually requeued. " +
-                "OutboxId={OutboxId}, EventType={EventType}",
+                "OutboxId={OutboxId}, EventType={EventType}, " +
+                "OperatorUserId={OperatorUserId}, RetryAuditId={RetryAuditId}",
                 notification.EmailNotificationOutboxId,
-                notification.EventType);
+                notification.EventType,
+                audit.OperatorUserId,
+                audit.RetryAuditId);
 
             return true;
         }
+
 
 
         public async Task<EmailDeliveryMetricsDto> GetDeliveryMetricsAsync(

@@ -89,9 +89,12 @@ namespace ConferenceBooking.Web.Service
             }, withBearer: false);
         }
 
+
         public async Task<ResponseDto?> RetryDeadLetterNotificationAsync(
             long notificationId,
-            string reason)
+            string reason,
+            string operatorUserId,
+            string operatorName)
         {
             return await _baseService.SendAsync(new RequestDto
             {
@@ -102,8 +105,11 @@ namespace ConferenceBooking.Web.Service
                 Data = new
                 {
                     ConfirmRetry = true,
-                    Reason = reason
+                    Reason = reason,
+                    OperatorUserId = operatorUserId,
+                    OperatorName = operatorName
                 }
+
             }, withBearer: false);
         }
     }
