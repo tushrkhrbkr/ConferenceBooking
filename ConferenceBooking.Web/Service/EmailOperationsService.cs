@@ -112,5 +112,32 @@ namespace ConferenceBooking.Web.Service
 
             }, withBearer: false);
         }
+
+        public async Task<ResponseDto?> GetRetryAuditHistoryAsync(
+    int page,
+    int pageSize,
+    long? notificationId)
+        {
+            var query =
+                $"?page={page}&pageSize={pageSize}";
+
+            if (notificationId.HasValue)
+            {
+                query +=
+                    $"&notificationId={notificationId.Value}";
+            }
+
+            return await _baseService.SendAsync(new RequestDto
+            {
+                ApiType = SD.ApiType.GET,
+
+                Url = GetBaseUrl() +
+                      "/api/EmailAPI/outbox/retry-audit" +
+                      query,
+
+                Headers = GetHeaders()
+
+            }, withBearer: false);
+        }
     }
 }

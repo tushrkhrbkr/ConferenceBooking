@@ -313,7 +313,83 @@ namespace ConferenceBooking.Services.EmailAPI.Service
             return true;
         }
 
+        public async Task<PagedEmailOutboxRetryAuditDto>
+    GetRetryAuditHistoryAsync(
+        int page,
+        int pageSize,
+        long? notificationId,
+        CancellationToken cancellationToken = default)
+        {
+            // Enforce safe pagination limits at service level as well.
+            if (page < 1)
+                page = 1;
 
+            if (pageSize < 1)
+                pageSize = 25;
+
+            if (pageSize > 100)
+                pageSize = 100;
+
+            if (notificationId.HasValue && notificationId.Value <= 0)
+            {
+                throw new ArgumentException(
+                    "Notification ID must be greater than zero.");
+            }
+
+            var query = _db.EmailOutboxRetryAudits
+                .AsNoTracking();
+
+            if (notificationId.HasValue)
+            {
+                query = query.Where(x =>
+                    x.EmailNotificationOutboxId == notificationId.Value);
+            }
+
+            var totalRecords = await query.CountAsync(
+                cancellationToken);
+
+            var totalPages = totalRecords == 0
+                ? 0
+                : (int)Math.Ceiling(
+                    totalRecords / (double)pageSize);
+
+            var items = await query
+                .OrderByDescending(x => x.RetriedAtUtc)
+                .ThenByDescending(x => x.RetryAuditId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(x => new EmailOutboxRetryAuditDto
+                {
+                    RetryAuditId = x.RetryAuditId,
+
+                    EmailNotificationOutboxId =
+                        x.EmailNotificationOutboxId,
+
+                    EventType = x.EventType,
+
+                    OperatorUserId = x.OperatorUserId,
+
+                    OperatorName = x.OperatorName,
+
+                    RetryReason = x.RetryReason,
+
+                    PreviousAttemptCount = x.PreviousAttemptCount,
+
+                    PreviousMaxAttempts = x.PreviousMaxAttempts,
+
+                    RetriedAtUtc = x.RetriedAtUtc
+                })
+                .ToListAsync(cancellationToken);
+
+            return new PagedEmailOutboxRetryAuditDto
+            {
+                Page = page,
+                PageSize = pageSize,
+                TotalRecords = totalRecords,
+                TotalPages = totalPages,
+                Items = items
+            };
+        }
 
         public async Task<EmailDeliveryMetricsDto> GetDeliveryMetricsAsync(
             DateTime fromUtc,

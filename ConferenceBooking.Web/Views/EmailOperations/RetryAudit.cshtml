@@ -1,0 +1,219 @@
+﻿@model ConferenceBooking.Web.Models.EmailOperations.EmailRetryAuditPageDto
+
+@{
+    ViewData["Title"] = "Email Retry Audit History";
+
+    var audit = Model.Audit;
+}
+
+<div class="page-container">
+
+    <div class="page-title-head d-flex align-items-center justify-content-between">
+        <div>
+            <h4 class="fw-bold mb-1">Retry Audit History</h4>
+            <p class="text-muted mb-0">
+                Track administrator-initiated email notification retries
+            </p>
+        </div>
+
+        <a asp-action="Index"
+           class="btn btn-light">
+            <i class="ti ti-arrow-left me-1"></i>
+            Email Operations
+        </a>
+    </div>
+
+    @if (TempData["error"] != null)
+    {
+        <div class="alert alert-warning mt-3">
+            @TempData["error"]
+        </div>
+    }
+
+    <div class="card mt-3">
+        <div class="card-body">
+
+            <form method="get"
+                  asp-action="RetryAudit"
+                  class="row align-items-end g-3">
+
+                <div class="col-md-5">
+                    <label class="form-label">
+                        Notification / Outbox ID
+                    </label>
+
+                    <input type="number"
+                           name="notificationId"
+                           class="form-control"
+                           min="1"
+                           value="@Model.NotificationId"
+                           placeholder="Enter notification ID" />
+                </div>
+
+                <div class="col-md-7">
+                    <button type="submit"
+                            class="btn btn-primary">
+                        <i class="ti ti-filter me-1"></i>
+                        Apply Filter
+                    </button>
+
+                    <a asp-action="RetryAudit"
+                       class="btn btn-light ms-1">
+                        Clear Filter
+                    </a>
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+
+    <div class="card">
+
+        <div class="card-header d-flex justify-content-between align-items-center">
+
+            <div>
+                <h5 class="card-title mb-0">
+                    Manual Retry Records
+                </h5>
+
+                <small class="text-muted">
+                    @audit.TotalRecords total records
+                </small>
+            </div>
+
+            <span class="badge bg-info-subtle text-info">
+                Page @audit.Page of @audit.TotalPages
+            </span>
+
+        </div>
+
+        <div class="card-body">
+
+            <div class="table-responsive">
+
+                <table class="table table-hover align-middle">
+
+                    <thead>
+                        <tr>
+                            <th>Retry ID</th>
+                            <th>Outbox ID</th>
+                            <th>Event</th>
+                            <th>Operator</th>
+                            <th>Reason</th>
+                            <th>Previous Attempts</th>
+                            <th>Retried At (UTC)</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        @if (audit.Items.Any())
+                        {
+                            foreach (var item in audit.Items)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">
+                                        @item.RetryAuditId
+                                    </td>
+
+                                    <td>
+                                        @item.EmailNotificationOutboxId
+                                    </td>
+
+                                    <td>
+                                        <span class="badge bg-light text-dark">
+                                            @item.EventType
+                                        </span>
+                                    </td>
+
+                                    <td>
+                                        <div class="fw-semibold">
+                                            @item.OperatorName
+                                        </div>
+                                        <small class="text-muted">
+                                            @item.OperatorUserId
+                                        </small>
+                                    </td>
+
+                                    <td style="min-width:220px;max-width:350px;">
+                                        @item.RetryReason
+                                    </td>
+
+                                    <td>
+                                        <span class="text-danger fw-semibold">
+                                            @item.PreviousAttemptCount
+                                            /
+                                            @item.PreviousMaxAttempts
+                                        </span>
+                                    </td>
+
+                                    <td>
+                                        @item.RetriedAtUtc.ToString(
+                                        "dd MMM yyyy HH:mm:ss")
+                            </td>
+                        </tr>
+                                                }
+                        }
+                        else
+                        {
+                            <tr>
+                                <td colspan="7"
+                                    class="text-center text-muted py-5">
+                                    <i class="ti ti-history fs-24"></i>
+                                    <div>No retry audit records found.</div>
+                                </td>
+                            </tr>
+                        }
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+            @if (audit.TotalPages > 1)
+            {
+                <div class="d-flex justify-content-between align-items-center mt-3">
+
+                    <div class="text-muted">
+                        Showing page @audit.Page of @audit.TotalPages
+                    </div>
+
+                    <nav aria-label="Retry audit pagination">
+
+                        <ul class="pagination mb-0">
+
+                            <li class="page-item @(audit.Page <= 1 ? "disabled" : "")">
+
+                                <a class="page-link"
+                                   asp-action="RetryAudit"
+                                   asp-route-page="@(audit.Page - 1)"
+                                   asp-route-notificationId="@Model.NotificationId">
+                                    Previous
+                                </a>
+
+                            </li>
+
+                            <li class="page-item @(audit.Page >= audit.TotalPages ? "disabled" : "")">
+
+                                <a class="page-link"
+                                   asp-action="RetryAudit"
+                                   asp-route-page="@(audit.Page + 1)"
+                                   asp-route-notificationId="@Model.NotificationId">
+                                    Next
+                                </a>
+
+                            </li>
+
+                        </ul>
+
+                    </nav>
+
+                </div>
+            }
+
+        </div>
+    </div>
+
+</div>

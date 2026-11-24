@@ -21,5 +21,13 @@ namespace ConferenceBooking.Services.EmailAPI.Service.IService
     DateTime fromUtc,
     DateTime toUtc,
     CancellationToken cancellationToken = default);
+
+        Task<PagedEmailOutboxRetryAuditDto> GetRetryAuditHistoryAsync(
+    int page,
+    int pageSize,
+    long? notificationId,
+    CancellationToken cancellationToken = default);
     }
+
+
 }

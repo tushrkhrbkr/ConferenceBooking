@@ -246,6 +246,65 @@ namespace ConferenceBooking.Services.EmailAPI.Controllers
             }
         }
 
+        [HttpGet("outbox/retry-audit")]
+        public async Task<IActionResult> GetRetryAuditHistory(
+    [FromHeader(Name = InternalApiKeyHeader)]
+    string? apiKey,
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 25,
+    [FromQuery] long? notificationId = null,
+    CancellationToken cancellationToken = default)
+        {
+            if (!IsValidInternalApiKey(apiKey))
+            {
+                return Unauthorized(new
+                {
+                    IsSuccess = false,
+                    Message = "Unauthorized."
+                });
+            }
+
+            if (page < 1 ||
+                pageSize < 1 ||
+                pageSize > 100 ||
+                (notificationId.HasValue && notificationId.Value <= 0))
+            {
+                return BadRequest(new
+                {
+                    IsSuccess = false,
+                    Message = "Invalid pagination or notification filter."
+                });
+            }
+
+            try
+            {
+                var result =
+                    await _emailAPIService.GetRetryAuditHistoryAsync(
+                        page,
+                        pageSize,
+                        notificationId,
+                        cancellationToken);
+
+                return Ok(new
+                {
+                    IsSuccess = true,
+                    Message = "Retry audit history retrieved successfully.",
+                    Result = result
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Retry audit history retrieval failed.");
+
+                return StatusCode(500, new
+                {
+                    IsSuccess = false,
+                    Message = "Unable to retrieve retry audit history."
+                });
+            }
+        }
 
         [HttpGet("outbox/metrics")]
         public async Task<IActionResult> GetDeliveryMetrics(

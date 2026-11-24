@@ -20,5 +20,10 @@ namespace ConferenceBooking.Web.Service.IService
             string operatorUserId,
             string operatorName);
 
+        Task<ResponseDto?> GetRetryAuditHistoryAsync(
+    int page,
+    int pageSize,
+    long? notificationId);
+
     }
 }

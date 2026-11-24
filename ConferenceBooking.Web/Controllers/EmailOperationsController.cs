@@ -188,5 +188,60 @@ namespace ConferenceBooking.Web.Controllers
 
             return RedirectToAction(nameof(Index));
         }
+
+        [HttpGet]
+        public async Task<IActionResult> RetryAudit(
+    int page = 1,
+    long? notificationId = null)
+        {
+            const int pageSize = 25;
+
+            if (page < 1 ||
+                (notificationId.HasValue && notificationId.Value <= 0))
+            {
+                return BadRequest("Invalid audit history filter.");
+            }
+
+            var model = new EmailRetryAuditPageDto
+            {
+                NotificationId = notificationId
+            };
+
+            try
+            {
+                var response =
+                    await _emailService.GetRetryAuditHistoryAsync(
+                        page,
+                        pageSize,
+                        notificationId);
+
+                if (response?.IsSuccess != true)
+                {
+                    model.Audit = new PagedEmailOutboxRetryAuditDto();
+
+                    TempData["error"] =
+                        response?.Message ??
+                        "Unable to retrieve retry audit history.";
+
+                    return View(model);
+                }
+
+                model.Audit =
+                    JsonConvert.DeserializeObject<PagedEmailOutboxRetryAuditDto>(
+                        JsonConvert.SerializeObject(response.Result))
+                    ?? new PagedEmailOutboxRetryAuditDto();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Unable to retrieve email retry audit history.");
+
+                TempData["error"] =
+                    "Retry audit history is temporarily unavailable.";
+            }
+
+            return View(model);
+        }
     }
 }
