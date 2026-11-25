@@ -14,12 +14,14 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IAuthService, AuthService>();
 
 SD.AuthAPIBase = builder.Configuration["ServiceUrls:AuthAPI"];
+SD.UpDownloadAPIBase = builder.Configuration["ServiceUrls:UpDownloadAPI"];
 
 builder.Services.AddScoped<IBaseService, BaseService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenProvider, TokenProvider>();
 builder.Services.AddScoped<ICaptchaService, CaptchaService>();
 builder.Services.AddScoped<IEmailOperationsService, EmailOperationsService>();
+builder.Services.AddScoped<IUpDownloadService, UpDownloadService>();
 
 builder.Services.AddAuthentication(options =>
 {
