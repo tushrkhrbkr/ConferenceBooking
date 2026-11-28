@@ -9,7 +9,7 @@
     }
   },
   "profiles": {
-    "CoonferenceBooking.Services.FeedbackAPI": {
+    "ConferenceBooking.Services.FeedbackAPI": {
       "commandName": "Project",
       "dotnetRunMessages": true,
       "launchBrowser": true,
