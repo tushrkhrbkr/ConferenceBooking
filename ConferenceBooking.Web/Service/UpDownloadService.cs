@@ -1,4 +1,5 @@
-﻿using ConferenceBooking.Web.Models;
+﻿
+using ConferenceBooking.Web.Models;
 using ConferenceBooking.Web.Service.IService;
 using ConferenceBooking.Web.Utility;
 
@@ -7,38 +8,43 @@ namespace ConferenceBooking.Web.Service
     public class UpDownloadService : IUpDownloadService
     {
         private readonly IBaseService _baseService;
+
         public UpDownloadService(IBaseService baseService)
         {
             _baseService = baseService;
         }
 
-        public async Task<ResponseDto?> UploadReportDocument(List<ReportDocumentsDto> docList)
+        public async Task<ResponseDto?> UploadReportDocument(
+            List<ReportDocumentsDto> docList)
         {
             return await _baseService.SendAsync(new RequestDto()
             {
                 ApiType = SD.ApiType.POST,
-                Url = SD.UpDownloadAPIBase + "/api/updownload/UploadReportDocs",
+                Url = SD.UpDownloadAPIBase +
+                      "/api/updownload/UploadReportDocs",
                 Data = docList
             });
         }
 
-        public async Task<ResponseDto?> UploadFeedbackDocument(List<FeedbackDocumentsDto> docList)
+        public async Task<ResponseDto?> UploadFeedbackDocument(
+            List<FeedbackDocumentsDto> docList)
         {
             return await _baseService.SendAsync(new RequestDto()
             {
                 ApiType = SD.ApiType.POST,
-                Url = SD.UpDownloadAPIBase + "/api/updownload/UploadFeedbackDocs",
+                Url = SD.UpDownloadAPIBase +
+                      "/api/updownload/UploadFeedbackDocs",
                 Data = docList
             });
         }
-
 
         public async Task<ResponseDto?> GetReportDocument(int referenceid)
         {
             return await _baseService.SendAsync(new RequestDto()
             {
                 ApiType = SD.ApiType.GET,
-                Url = SD.UpDownloadAPIBase + "/api/updownload/getReportDocument/" + referenceid
+                Url = SD.UpDownloadAPIBase +
+                      "/api/updownload/getReportDocument/" + referenceid
             });
         }
 
@@ -47,7 +53,38 @@ namespace ConferenceBooking.Web.Service
             return await _baseService.SendAsync(new RequestDto()
             {
                 ApiType = SD.ApiType.GET,
-                Url = SD.UpDownloadAPIBase + "/api/updownload/getFeedbackDocument/" + referenceid
+                Url = SD.UpDownloadAPIBase +
+                      "/api/updownload/getFeedbackDocument/" + referenceid
+            });
+        }
+
+        public async Task<ResponseDto?> GetReportDocumentMetadata(
+            long referenceid,
+            string referenceTable)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.GET,
+                Url = SD.UpDownloadAPIBase +
+                      "/api/updownload/GetReportDocumentMetadata/" +
+                      referenceid +
+                      "?referenceTable=" +
+                      Uri.EscapeDataString(referenceTable)
+            });
+        }
+
+        public async Task<ResponseDto?> GetFeedbackDocumentMetadata(
+            long referenceid,
+            string referenceTable)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.GET,
+                Url = SD.UpDownloadAPIBase +
+                      "/api/updownload/GetFeedbackDocumentMetadata/" +
+                      referenceid +
+                      "?referenceTable=" +
+                      Uri.EscapeDataString(referenceTable)
             });
         }
     }

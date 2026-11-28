@@ -24,6 +24,52 @@ namespace ConferenceBooking.Services.UpDownload.Services
                 ?? new HashSet<string>();
         }
 
+
+        public (bool IsValid, string Message) ValidateFeedback(
+            string? fileName,
+            byte[]? fileData,
+            string? referenceTable,
+            long? referenceId)
+        {
+            if (!string.Equals(
+                referenceTable?.Trim(),
+                "Tbl_Feedback_Submission",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return (false,
+                    "Feedback documents can only reference Tbl_Feedback_Submission.");
+            }
+
+            return Validate(
+                fileName,
+                fileData,
+                referenceTable,
+                referenceId);
+        }
+
+        public (bool IsValid, string Message) ValidateReport(
+            string? fileName,
+            byte[]? fileData,
+            string? referenceTable,
+            long? referenceId)
+        {
+            if (!string.Equals(
+                referenceTable?.Trim(),
+                "Tbl_Report_Submission",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return (false,
+                    "Report documents can only reference Tbl_Report_Submission.");
+            }
+
+            return Validate(
+                fileName,
+                fileData,
+                referenceTable,
+                referenceId);
+        }
+
+
         public (bool IsValid, string Message) Validate(
             string? fileName,
             byte[]? fileData,

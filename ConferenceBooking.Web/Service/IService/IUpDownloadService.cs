@@ -1,4 +1,5 @@
-﻿using ConferenceBooking.Web.Models;
+﻿
+using ConferenceBooking.Web.Models;
 
 namespace ConferenceBooking.Web.Service.IService
 {
@@ -8,8 +9,18 @@ namespace ConferenceBooking.Web.Service.IService
 
         Task<ResponseDto?> GetFeedbackDocument(int referenceid);
 
-        Task<ResponseDto?> UploadReportDocument(List<ReportDocumentsDto> docList);
+        Task<ResponseDto?> UploadReportDocument(
+            List<ReportDocumentsDto> docList);
 
-        Task<ResponseDto?> UploadFeedbackDocument(List<FeedbackDocumentsDto> docList);
+        Task<ResponseDto?> UploadFeedbackDocument(
+            List<FeedbackDocumentsDto> docList);
+
+        Task<ResponseDto?> GetReportDocumentMetadata(
+            long referenceid,
+            string referenceTable);
+
+        Task<ResponseDto?> GetFeedbackDocumentMetadata(
+            long referenceid,
+            string referenceTable);
     }
 }

@@ -62,7 +62,7 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
 
                 foreach (var doc in docList)
                 {
-                    var validation = _validator.Validate(
+                    var validation = _validator.ValidateFeedback(
                         doc.DocumentName,
                         doc.DocumentData,
                         doc.ReferenceTable,
@@ -142,7 +142,7 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
 
                 foreach (var doc in docList)
                 {
-                    var validation = _validator.Validate(
+                    var validation = _validator.ValidateReport(
                         doc.DocumentName,
                         doc.DocumentData,
                         doc.ReferenceTable,
