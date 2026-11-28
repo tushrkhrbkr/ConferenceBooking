@@ -333,6 +333,144 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
             }
         }
 
+        [HttpGet]
+        [Route("GetFeedbackDocumentMetadata/{referenceid:long}")]
+        public ActionResult<ResponseDto> GetFeedbackDocumentMetadata(
+    long referenceid,
+    [FromQuery] string? referenceTable)
+        {
+            var response = new ResponseDto();
+
+            try
+            {
+                if (referenceid <= 0)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Invalid reference ID.";
+                    return BadRequest(response);
+                }
+
+                if (string.IsNullOrWhiteSpace(referenceTable))
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Reference table is required.";
+                    return BadRequest(response);
+                }
+
+                if (referenceTable.Length > 128)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Reference table name cannot exceed 128 characters.";
+                    return BadRequest(response);
+                }
+
+                var documents = _db.Tbl_Feedback_DocumentRepository
+                    .Where(x =>
+                        x.ReferenceID == referenceid &&
+                        x.ReferenceTable == referenceTable)
+                    .OrderByDescending(x => x.UploadedOn)
+                    .Select(x => new
+                    {
+                        x.DocumentID,
+                        x.DocumentAutoID,
+                        x.ReferenceTable,
+                        x.ReferenceID,
+                        x.DocumentName,
+                        x.DocumentType,
+                        x.UploadedBy,
+                        x.UploadedOn,
+                        DownloadUrl = "/api/updownload/DownloadFeedbackDocument/" + x.DocumentID
+                    })
+                    .ToList();
+
+                response.IsSuccess = true;
+                response.Message = "Feedback document metadata retrieved successfully.";
+                response.Result = documents;
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error retrieving feedback document metadata for ReferenceID {ReferenceID}",
+                    referenceid);
+
+                response.IsSuccess = false;
+                response.Message = "An error occurred while retrieving feedback document metadata.";
+
+                return StatusCode(500, response);
+            }
+        }
+
+        [HttpGet]
+        [Route("GetReportDocumentMetadata/{referenceid:long}")]
+        public ActionResult<ResponseDto> GetReportDocumentMetadata(
+            long referenceid,
+            [FromQuery] string? referenceTable)
+        {
+            var response = new ResponseDto();
+
+            try
+            {
+                if (referenceid <= 0)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Invalid reference ID.";
+                    return BadRequest(response);
+                }
+
+                if (string.IsNullOrWhiteSpace(referenceTable))
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Reference table is required.";
+                    return BadRequest(response);
+                }
+
+                if (referenceTable.Length > 128)
+                {
+                    response.IsSuccess = false;
+                    response.Message = "Reference table name cannot exceed 128 characters.";
+                    return BadRequest(response);
+                }
+
+                var documents = _db.Tbl_Report_DocumentRepository
+                    .Where(x =>
+                        x.ReferenceID == referenceid &&
+                        x.ReferenceTable == referenceTable)
+                    .OrderByDescending(x => x.UploadedOn)
+                    .Select(x => new
+                    {
+                        x.DocumentID,
+                        x.DocumentAutoID,
+                        x.ReferenceTable,
+                        x.ReferenceID,
+                        x.DocumentName,
+                        x.DocumentType,
+                        x.UploadedBy,
+                        x.UploadedOn,
+                        DownloadUrl = "/api/updownload/DownloadReportDocument/" + x.DocumentID
+                    })
+                    .ToList();
+
+                response.IsSuccess = true;
+                response.Message = "Report document metadata retrieved successfully.";
+                response.Result = documents;
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error retrieving report document metadata for ReferenceID {ReferenceID}",
+                    referenceid);
+
+                response.IsSuccess = false;
+                response.Message = "An error occurred while retrieving report document metadata.";
+
+                return StatusCode(500, response);
+            }
+        }
+
         private string GetContentType(string? fileName)
         {
             var extension = Path.GetExtension(fileName ?? "")
