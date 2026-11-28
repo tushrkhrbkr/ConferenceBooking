@@ -25,63 +25,11 @@ namespace ConferenceBooking.Services.UpDownload.Services
         }
 
 
-        public (bool IsValid, string Message) ValidateFeedback(
-            string? fileName,
-            byte[]? fileData,
-            string? referenceTable,
-            long? referenceId)
-        {
-            if (!string.Equals(
-                referenceTable?.Trim(),
-                "Tbl_Feedback_Submission",
-                StringComparison.OrdinalIgnoreCase))
-            {
-                return (false,
-                    "Feedback documents can only reference Tbl_Feedback_Submission.");
-            }
-
-            return Validate(
-                fileName,
-                fileData,
-                referenceTable,
-                referenceId);
-        }
-
-        public (bool IsValid, string Message) ValidateReport(
-            string? fileName,
-            byte[]? fileData,
-            string? referenceTable,
-            long? referenceId)
-        {
-            if (!string.Equals(
-                referenceTable?.Trim(),
-                "Tbl_Report_Submission",
-                StringComparison.OrdinalIgnoreCase))
-            {
-                return (false,
-                    "Report documents can only reference Tbl_Report_Submission.");
-            }
-
-            return Validate(
-                fileName,
-                fileData,
-                referenceTable,
-                referenceId);
-        }
-
-
         public (bool IsValid, string Message) Validate(
             string? fileName,
             byte[]? fileData,
-            string? referenceTable,
             long? referenceId)
         {
-            if (string.IsNullOrWhiteSpace(referenceTable))
-                return (false, "Reference table is required.");
-
-            if (referenceTable.Length > 128)
-                return (false, "Reference table cannot exceed 128 characters.");
-
             if (!referenceId.HasValue || referenceId.Value <= 0)
                 return (false, "A valid ReferenceID is required.");
 

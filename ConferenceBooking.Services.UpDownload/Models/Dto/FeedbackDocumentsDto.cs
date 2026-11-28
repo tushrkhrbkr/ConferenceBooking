@@ -7,8 +7,6 @@ namespace ConferenceBooking.Services.UpDownload.Models.Dto
 
         public int? DocumentAutoID { get; set; }
 
-        public string? ReferenceTable { get; set; }
-
         public long? ReferenceID { get; set; }
 
         public string? DocumentName { get; set; }

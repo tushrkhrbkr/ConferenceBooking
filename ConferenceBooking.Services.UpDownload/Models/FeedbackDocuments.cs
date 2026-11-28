@@ -13,9 +13,6 @@ namespace ConferenceBooking.Services.UpDownload.Models
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int DocumentAutoID { get; set; }
 
-        [MaxLength(128)]
-        public string? ReferenceTable { get; set; }
-
         public long? ReferenceID { get; set; }
 
         [MaxLength(100)]

@@ -1,10 +1,11 @@
 ﻿
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using Azure;
 using ConferenceBooking.Services.UpDownload.Data;
 using ConferenceBooking.Services.UpDownload.Models;
 using ConferenceBooking.Services.UpDownload.Models.Dto;
 using ConferenceBooking.Services.UpDownload.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
 namespace ConferenceBooking.Services.UpDownload.Controllers
@@ -62,10 +63,9 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
 
                 foreach (var doc in docList)
                 {
-                    var validation = _validator.ValidateFeedback(
+                    var validation = _validator.Validate(
                         doc.DocumentName,
                         doc.DocumentData,
-                        doc.ReferenceTable,
                         doc.ReferenceID);
 
                     if (!validation.IsValid)
@@ -83,7 +83,6 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
                         DocumentData = doc.DocumentData,
                         DocumentName = doc.DocumentName,
                         DocumentType = doc.DocumentType,
-                        ReferenceTable = doc.ReferenceTable,
                         UploadedBy = uploadedBy,
                         UploadedOn = DateTime.UtcNow
                     }).ToList();
@@ -142,10 +141,9 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
 
                 foreach (var doc in docList)
                 {
-                    var validation = _validator.ValidateReport(
+                    var validation = _validator.Validate(
                         doc.DocumentName,
                         doc.DocumentData,
-                        doc.ReferenceTable,
                         doc.ReferenceID);
 
                     if (!validation.IsValid)
@@ -163,7 +161,6 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
                         DocumentData = doc.DocumentData,
                         DocumentName = doc.DocumentName,
                         DocumentType = doc.DocumentType,
-                        ReferenceTable = doc.ReferenceTable,
                         UploadedBy = uploadedBy,
                         UploadedOn = DateTime.UtcNow
                     }).ToList();
@@ -263,8 +260,9 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
 
         [HttpGet]
         [Route("DownloadFeedbackDocument/{documentId:guid}")]
-        public IActionResult DownloadFeedbackDocument(Guid documentId)
+        public ActionResult<ResponseDto> DownloadFeedbackDocument(Guid documentId)
         {
+            var response = new ResponseDto();
             try
             {
                 var document = _db.Tbl_Feedback_DocumentRepository
@@ -277,23 +275,27 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
                     document.DocumentData.Length == 0)
                     return NotFound("Document data is unavailable.");
 
-                var fileName = Path.GetFileName(document.DocumentName ?? "document");
+                //var fileName = Path.GetFileName(document.DocumentName ?? "document");
 
-                var contentType = GetContentType(fileName);
+                //var contentType = GetContentType(fileName);
 
-                return File(
-                    document.DocumentData,
-                    contentType,
-                    fileName);
+                //return File(
+                //    document.DocumentData,
+                //    contentType,
+                //    fileName);
+                response.Result = document;
+                return Ok(response);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
                     "Error downloading feedback document {DocumentId}",
                     documentId);
+                response.IsSuccess = false;
+                response.Message = "An error occurred while downloading the document.";
 
-                return StatusCode(500,
-                    "An error occurred while downloading the document.");
+                return StatusCode(500, response);
+               
             }
         }
 
@@ -301,6 +303,7 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
         [Route("DownloadReportDocument/{documentId:guid}")]
         public IActionResult DownloadReportDocument(Guid documentId)
         {
+            var response = new ResponseDto();
             try
             {
                 var document = _db.Tbl_Report_DocumentRepository
@@ -313,23 +316,26 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
                     document.DocumentData.Length == 0)
                     return NotFound("Document data is unavailable.");
 
-                var fileName = Path.GetFileName(document.DocumentName ?? "document");
+                //var fileName = Path.GetFileName(document.DocumentName ?? "document");
 
-                var contentType = GetContentType(fileName);
+                //var contentType = GetContentType(fileName);
 
-                return File(
-                    document.DocumentData,
-                    contentType,
-                    fileName);
+                //return File(
+                //    document.DocumentData,
+                //    contentType,
+                //    fileName);
+                response.Result = document;
+                return Ok(response);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Error downloading report document {DocumentId}",
+                    "Error downloading feedback document {DocumentId}",
                     documentId);
+                response.IsSuccess = false;
+                response.Message = "An error occurred while downloading the document.";
 
-                return StatusCode(500,
-                    "An error occurred while downloading the document.");
+                return StatusCode(500, response);
             }
         }
 
@@ -366,14 +372,12 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
 
                 var documents = _db.Tbl_Feedback_DocumentRepository
                     .Where(x =>
-                        x.ReferenceID == referenceid &&
-                        x.ReferenceTable == referenceTable)
+                        x.ReferenceID == referenceid)
                     .OrderByDescending(x => x.UploadedOn)
                     .Select(x => new
                     {
                         x.DocumentID,
                         x.DocumentAutoID,
-                        x.ReferenceTable,
                         x.ReferenceID,
                         x.DocumentName,
                         x.DocumentType,
@@ -435,14 +439,12 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
 
                 var documents = _db.Tbl_Report_DocumentRepository
                     .Where(x =>
-                        x.ReferenceID == referenceid &&
-                        x.ReferenceTable == referenceTable)
+                        x.ReferenceID == referenceid)
                     .OrderByDescending(x => x.UploadedOn)
                     .Select(x => new
                     {
                         x.DocumentID,
                         x.DocumentAutoID,
-                        x.ReferenceTable,
                         x.ReferenceID,
                         x.DocumentName,
                         x.DocumentType,
