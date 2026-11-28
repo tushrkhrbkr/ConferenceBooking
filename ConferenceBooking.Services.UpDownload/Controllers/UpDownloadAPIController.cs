@@ -93,7 +93,7 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
 
         [HttpGet]
         [Route("getFeedbackDocument/{referenceid}")]
-        public ResponseDto GetFeedbackDocument(int referenceid)
+        public ResponseDto GetFeedbackDocument(long referenceid)
         {
             try
             {
@@ -122,7 +122,7 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
 
         [HttpGet]
         [Route("getReportDocument/{referenceid}")]
-        public ResponseDto GetReportDocument(int referenceid)
+        public ResponseDto GetReportDocument(long referenceid)
         {
             try
             {
