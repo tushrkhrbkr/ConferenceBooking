@@ -22,5 +22,9 @@ namespace ConferenceBooking.Web.Service.IService
         Task<ResponseDto?> GetFeedbackDocumentMetadata(
             long referenceid,
             string referenceTable);
+
+        Task<ResponseDto?> GetFeedbackDocumentById(Guid documentId);
+
+        Task<ResponseDto?> GetReportDocumentById(Guid documentId);
     }
 }

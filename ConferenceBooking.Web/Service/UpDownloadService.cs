@@ -87,5 +87,27 @@ namespace ConferenceBooking.Web.Service
                       Uri.EscapeDataString(referenceTable)
             });
         }
+
+        public async Task<ResponseDto?> GetFeedbackDocumentById(Guid documentId)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.GET,
+                Url = SD.UpDownloadAPIBase +
+                      "/api/updownload/DownloadFeedbackDocument/" +
+                      documentId
+            });
+        }
+
+        public async Task<ResponseDto?> GetReportDocumentById(Guid documentId)
+        {
+            return await _baseService.SendAsync(new RequestDto()
+            {
+                ApiType = SD.ApiType.GET,
+                Url = SD.UpDownloadAPIBase +
+                      "/api/updownload/DownloadReportDocument/" +
+                      documentId
+            });
+        }
     }
 }
