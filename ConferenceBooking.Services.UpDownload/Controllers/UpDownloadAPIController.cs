@@ -260,5 +260,96 @@ namespace ConferenceBooking.Services.UpDownload.Controllers
                 return StatusCode(500, response);
             }
         }
+
+        [HttpGet]
+        [Route("DownloadFeedbackDocument/{documentId:guid}")]
+        public IActionResult DownloadFeedbackDocument(Guid documentId)
+        {
+            try
+            {
+                var document = _db.Tbl_Feedback_DocumentRepository
+                    .FirstOrDefault(x => x.DocumentID == documentId);
+
+                if (document == null)
+                    return NotFound("Feedback document not found.");
+
+                if (document.DocumentData == null ||
+                    document.DocumentData.Length == 0)
+                    return NotFound("Document data is unavailable.");
+
+                var fileName = Path.GetFileName(document.DocumentName ?? "document");
+
+                var contentType = GetContentType(fileName);
+
+                return File(
+                    document.DocumentData,
+                    contentType,
+                    fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error downloading feedback document {DocumentId}",
+                    documentId);
+
+                return StatusCode(500,
+                    "An error occurred while downloading the document.");
+            }
+        }
+
+        [HttpGet]
+        [Route("DownloadReportDocument/{documentId:guid}")]
+        public IActionResult DownloadReportDocument(Guid documentId)
+        {
+            try
+            {
+                var document = _db.Tbl_Report_DocumentRepository
+                    .FirstOrDefault(x => x.DocumentID == documentId);
+
+                if (document == null)
+                    return NotFound("Report document not found.");
+
+                if (document.DocumentData == null ||
+                    document.DocumentData.Length == 0)
+                    return NotFound("Document data is unavailable.");
+
+                var fileName = Path.GetFileName(document.DocumentName ?? "document");
+
+                var contentType = GetContentType(fileName);
+
+                return File(
+                    document.DocumentData,
+                    contentType,
+                    fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error downloading report document {DocumentId}",
+                    documentId);
+
+                return StatusCode(500,
+                    "An error occurred while downloading the document.");
+            }
+        }
+
+        private string GetContentType(string? fileName)
+        {
+            var extension = Path.GetExtension(fileName ?? "")
+                .ToLowerInvariant();
+
+            return extension switch
+            {
+                ".pdf" => "application/pdf",
+                ".doc" => "application/msword",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".xls" => "application/vnd.ms-excel",
+                ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".jpg" => "image/jpeg",
+                ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                _ => "application/octet-stream"
+            };
+        }
     }
 }
